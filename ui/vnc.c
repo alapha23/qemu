@@ -1740,6 +1740,7 @@ static void pointer_event(VncState *vs, int button_mask, int x, int y)
 static void reset_keys(VncState *vs)
 {
     int i;
+    fprintf(stderr, "reset_keys\n");
     for(i = 0; i < 256; i++) {
         if (vs->modifiers_state[i]) {
             qemu_input_event_send_key_number(vs->vd->dcl.con, i, false);
@@ -1747,16 +1748,19 @@ static void reset_keys(VncState *vs)
             vs->modifiers_state[i] = 0;
         }
     }
+    fprintf(stderr, "reset_keys end\n\n");
 }
 
 static void press_key(VncState *vs, int keysym)
 {
     int keycode = keysym2scancode(vs->vd->kbd_layout, keysym,
                                   false, false, false) & SCANCODE_KEYMASK;
+    fprintf(stderr, "press_key\n");
     qemu_input_event_send_key_number(vs->vd->dcl.con, keycode, true);
     qemu_input_event_send_key_delay(vs->vd->key_delay_ms);
     qemu_input_event_send_key_number(vs->vd->dcl.con, keycode, false);
     qemu_input_event_send_key_delay(vs->vd->key_delay_ms);
+    fprintf(stderr, "press_key end\n\n");
 }
 
 static void vnc_led_state_change(VncState *vs)
@@ -1797,6 +1801,7 @@ static void kbd_leds(void *opaque, int ledstate)
 
 static void do_key_event(VncState *vs, int down, int keycode, int sym)
 {
+    fprintf(stderr, "do_key_event\n");
     /* QEMU console switch */
     switch(keycode) {
     case 0x2a:                          /* Left Shift */
@@ -1981,10 +1986,12 @@ static void do_key_event(VncState *vs, int down, int keycode, int sym)
             }
         }
     }
+    fprintf(stderr, "do_key_event end\n\n");
 }
 
 static void vnc_release_modifiers(VncState *vs)
 {
+    fprintf(stderr, "vnc_release_modifiers\n");
     static const int keycodes[] = {
         /* shift, control, alt keys, both left & right */
         0x2a, 0x36, 0x1d, 0x9d, 0x38, 0xb8,
@@ -2002,6 +2009,7 @@ static void vnc_release_modifiers(VncState *vs)
         qemu_input_event_send_key_number(vs->vd->dcl.con, keycode, false);
         qemu_input_event_send_key_delay(vs->vd->key_delay_ms);
     }
+    fprintf(stderr, "vnc_release_modifiers end\n\n");
 }
 
 static const char *code2name(int keycode)

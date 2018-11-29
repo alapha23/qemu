@@ -42,7 +42,7 @@ static QTAILQ_HEAD(QemuInputEventQueueHead, QemuInputEventQueue) kbd_queue =
 static QEMUTimer *kbd_timer;
 static uint32_t kbd_default_delay_ms = 10;
 static uint32_t queue_count;
-static uint32_t queue_limit = 1024;
+static uint32_t queue_limit = 102400;
 
 QemuInputHandlerState *qemu_input_handler_register(DeviceState *dev,
                                                    QemuInputHandler *handler)
@@ -130,6 +130,7 @@ void qmp_input_send_event(bool has_device, const char *device,
     Error *err = NULL;
 
     con = NULL;
+    fprintf(stderr, "qmp_input_send_event\n");
     if (has_device) {
         if (!has_head) {
             head = 0;
@@ -330,6 +331,7 @@ static void qemu_input_queue_sync(struct QemuInputEventQueueHead *queue)
 void qemu_input_event_send_impl(QemuConsole *src, InputEvent *evt)
 {
     QemuInputHandlerState *s;
+    fprintf(stderr, "qemu_input_event_send_impl\n");
 
     qemu_input_event_trace(src, evt);
 
@@ -345,6 +347,8 @@ void qemu_input_event_send_impl(QemuConsole *src, InputEvent *evt)
     }
     s->handler->event(s->dev, src, evt);
     s->events++;
+    fprintf(stderr, "qemu_input_event_send_impl end\n\n");
+
 }
 
 void qemu_input_event_send(QemuConsole *src, InputEvent *evt)
@@ -415,12 +419,15 @@ void qemu_input_event_send_key(QemuConsole *src, KeyValue *key, bool down)
 {
     InputEvent *evt;
     evt = qemu_input_event_new_key(key, down);
+    fprintf(stderr,"qemu_input_event_send_key: %d\n", key->u.qcode.data);
+    fflush(stderr);
+
     if (QTAILQ_EMPTY(&kbd_queue)) {
         qemu_input_event_send(src, evt);
         qemu_input_event_sync();
         qapi_free_InputEvent(evt);
     } else if (queue_count < queue_limit) {
-        qemu_input_queue_event(&kbd_queue, src, evt);
+        qemu_input_queue_event(&kbd_queue, src, evt);     // add new item to queue
         qemu_input_queue_sync(&kbd_queue);
     } else {
         qapi_free_InputEvent(evt);
@@ -430,6 +437,7 @@ void qemu_input_event_send_key(QemuConsole *src, KeyValue *key, bool down)
 void qemu_input_event_send_key_number(QemuConsole *src, int num, bool down)
 {
     QKeyCode code = qemu_input_key_number_to_qcode(num);
+    fprintf(stderr, "qemu_input_event_send_key_number\n");
     qemu_input_event_send_key_qcode(src, code, down);
 }
 
@@ -438,7 +446,10 @@ void qemu_input_event_send_key_qcode(QemuConsole *src, QKeyCode q, bool down)
     KeyValue *key = g_new0(KeyValue, 1);
     key->type = KEY_VALUE_KIND_QCODE;
     key->u.qcode.data = q;
+    fprintf(stderr, "qemu_input_event_send_key_qcode\n");
     qemu_input_event_send_key(src, key, down);
+    // hacky path
+    //qemu_input_event_send_key_delay(20);
 }
 
 void qemu_input_event_send_key_delay(uint32_t delay_ms)

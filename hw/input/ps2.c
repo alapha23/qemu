@@ -209,6 +209,7 @@ void ps2_raise_irq(PS2State *s)
 
 void ps2_queue(PS2State *s, int b)
 {
+    fprintf(stderr, "ps2_queue %d\n", b);
     ps2_queue_noirq(s, b);
     s->update_irq(s->update_arg, 1);
 }
@@ -274,6 +275,7 @@ static void ps2_put_keycode(void *opaque, int keycode)
 static void ps2_keyboard_event(DeviceState *dev, QemuConsole *src,
                                InputEvent *evt)
 {
+    fprintf(stderr, "ps2_keyboard_event\n");
     PS2KbdState *s = (PS2KbdState *)dev;
     InputKeyEvent *key = evt->u.key.data;
     int qcode;
@@ -487,6 +489,8 @@ static void ps2_keyboard_event(DeviceState *dev, QemuConsole *src,
                           "ps2: ignoring key with qcode %d\n", qcode);
         }
     }
+    fprintf(stderr, "ps2_keyboard_event end\n\n");
+
 }
 
 uint32_t ps2_read_data(PS2State *s)

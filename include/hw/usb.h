@@ -25,7 +25,8 @@
  * THE SOFTWARE.
  */
 
-#include "hw/qdev.h"
+#include "exec/memory.h"
+#include "hw/qdev-core.h"
 #include "qemu/iov.h"
 #include "qemu/queue.h"
 
@@ -271,7 +272,7 @@ struct USBDevice {
      OBJECT_GET_CLASS(USBDeviceClass, (obj), TYPE_USB_DEVICE)
 
 typedef void (*USBDeviceRealize)(USBDevice *dev, Error **errp);
-typedef void (*USBDeviceUnrealize)(USBDevice *dev, Error **errp);
+typedef void (*USBDeviceUnrealize)(USBDevice *dev);
 
 typedef struct USBDeviceClass {
     DeviceClass parent_class;
@@ -408,7 +409,7 @@ struct USBPacket {
 
 struct USBCombinedPacket {
     USBPacket *first;
-    QTAILQ_HEAD(packets_head, USBPacket) packets;
+    QTAILQ_HEAD(, USBPacket) packets;
     QEMUIOVector iov;
 };
 
@@ -592,8 +593,6 @@ void usb_device_free_streams(USBDevice *dev, USBEndpoint **eps, int nr_eps);
 const char *usb_device_get_product_desc(USBDevice *dev);
 
 const USBDesc *usb_device_get_usb_desc(USBDevice *dev);
-
-int ehci_create_ich9_with_companions(PCIBus *bus, int slot);
 
 /* quirks.c */
 

@@ -28,16 +28,14 @@
 #include "qemu/osdep.h"
 #include "qemu/units.h"
 #include "qapi/error.h"
-#include "qemu-common.h"
 #include "cpu.h"
 #include "hw/sysbus.h"
-#include "hw/hw.h"
 #include "net/net.h"
 #include "hw/block/flash.h"
 #include "sysemu/sysemu.h"
-#include "hw/devices.h"
 #include "hw/boards.h"
 #include "hw/char/serial.h"
+#include "hw/qdev-properties.h"
 #include "exec/address-spaces.h"
 #include "hw/ssi/ssi.h"
 
@@ -107,11 +105,9 @@ petalogix_ml605_init(MachineState *machine)
     dinfo = drive_get(IF_PFLASH, 0, 0);
     /* 5th parameter 2 means bank-width
      * 10th paremeter 0 means little-endian */
-    pflash_cfi01_register(FLASH_BASEADDR,
-                          NULL, "petalogix_ml605.flash", FLASH_SIZE,
+    pflash_cfi01_register(FLASH_BASEADDR, "petalogix_ml605.flash", FLASH_SIZE,
                           dinfo ? blk_by_legacy_dinfo(dinfo) : NULL,
-                          64 * KiB, FLASH_SIZE >> 16,
-                          2, 0x89, 0x18, 0x0000, 0x0, 0);
+                          64 * KiB, 2, 0x89, 0x18, 0x0000, 0x0, 0);
 
 
     dev = qdev_create(NULL, "xlnx.xps-intc");
@@ -142,10 +138,8 @@ petalogix_ml605_init(MachineState *machine)
     dma = qdev_create(NULL, "xlnx.axi-dma");
 
     /* FIXME: attach to the sysbus instead */
-    object_property_add_child(qdev_get_machine(), "xilinx-eth", OBJECT(eth0),
-                              NULL);
-    object_property_add_child(qdev_get_machine(), "xilinx-dma", OBJECT(dma),
-                              NULL);
+    object_property_add_child(qdev_get_machine(), "xilinx-eth", OBJECT(eth0));
+    object_property_add_child(qdev_get_machine(), "xilinx-dma", OBJECT(dma));
 
     ds = object_property_get_link(OBJECT(dma),
                                   "axistream-connected-target", NULL);
@@ -154,9 +148,9 @@ petalogix_ml605_init(MachineState *machine)
     qdev_set_nic_properties(eth0, &nd_table[0]);
     qdev_prop_set_uint32(eth0, "rxmem", 0x1000);
     qdev_prop_set_uint32(eth0, "txmem", 0x1000);
-    object_property_set_link(OBJECT(eth0), OBJECT(ds),
+    object_property_set_link(OBJECT(eth0), ds,
                              "axistream-connected", &error_abort);
-    object_property_set_link(OBJECT(eth0), OBJECT(cs),
+    object_property_set_link(OBJECT(eth0), cs,
                              "axistream-control-connected", &error_abort);
     qdev_init_nofail(eth0);
     sysbus_mmio_map(SYS_BUS_DEVICE(eth0), 0, AXIENET_BASEADDR);
@@ -167,9 +161,9 @@ petalogix_ml605_init(MachineState *machine)
     cs = object_property_get_link(OBJECT(eth0),
                                   "axistream-control-connected-target", NULL);
     qdev_prop_set_uint32(dma, "freqhz", 100 * 1000000);
-    object_property_set_link(OBJECT(dma), OBJECT(ds),
+    object_property_set_link(OBJECT(dma), ds,
                              "axistream-connected", &error_abort);
-    object_property_set_link(OBJECT(dma), OBJECT(cs),
+    object_property_set_link(OBJECT(dma), cs,
                              "axistream-control-connected", &error_abort);
     qdev_init_nofail(dma);
     sysbus_mmio_map(SYS_BUS_DEVICE(dma), 0, AXIDMA_BASEADDR);
@@ -220,7 +214,6 @@ static void petalogix_ml605_machine_init(MachineClass *mc)
 {
     mc->desc = "PetaLogix linux refdesign for xilinx ml605 little endian";
     mc->init = petalogix_ml605_init;
-    mc->is_default = 0;
 }
 
 DEFINE_MACHINE("petalogix-ml605", petalogix_ml605_machine_init)

@@ -176,7 +176,7 @@ int qemu_ftruncate64(int fd, int64_t length)
     BOOL res;
 
     if ((GetVersion() & 0x80000000UL) && (length >> 32) != 0)
-	return -1;
+        return -1;
 
     h = (HANDLE)_get_osfhandle(fd);
 
@@ -184,13 +184,13 @@ int qemu_ftruncate64(int fd, int64_t length)
     li.HighPart = 0;
     li.LowPart = SetFilePointer (h, 0, &li.HighPart, FILE_CURRENT);
     if (li.LowPart == INVALID_SET_FILE_POINTER && GetLastError() != NO_ERROR) {
-	return -1;
+        return -1;
     }
 
     high = length >> 32;
     dw = SetFilePointer(h, (DWORD) length, &high, FILE_BEGIN);
     if (dw == INVALID_SET_FILE_POINTER && GetLastError() != NO_ERROR) {
-	return -1;
+        return -1;
     }
     res = SetEndOfFile(h);
 
@@ -203,7 +203,7 @@ static int set_sparse(int fd)
 {
     DWORD returned;
     return (int) DeviceIoControl((HANDLE)_get_osfhandle(fd), FSCTL_SET_SPARSE,
-				 NULL, 0, NULL, 0, &returned, NULL);
+                                 NULL, 0, NULL, 0, &returned, NULL);
 }
 
 static void raw_detach_aio_context(BlockDriverState *bs)
@@ -408,6 +408,9 @@ static int raw_open(BlockDriverState *bs, QDict *options, int flags,
         win32_aio_attach_aio_context(s->aio, bdrv_get_aio_context(bs));
     }
 
+    /* When extending regular files, we get zeros from the OS */
+    bs->supported_truncate_flags = BDRV_REQ_ZERO_WRITE;
+
     ret = 0;
 fail:
     qemu_opts_del(opts);
@@ -468,7 +471,8 @@ static void raw_close(BlockDriverState *bs)
 }
 
 static int coroutine_fn raw_co_truncate(BlockDriverState *bs, int64_t offset,
-                                        PreallocMode prealloc, Error **errp)
+                                        bool exact, PreallocMode prealloc,
+                                        BdrvRequestFlags flags, Error **errp)
 {
     BDRVRawState *s = bs->opaque;
     LONG low, high;
@@ -587,7 +591,9 @@ static int raw_co_create(BlockdevCreateOptions *options, Error **errp)
     return 0;
 }
 
-static int coroutine_fn raw_co_create_opts(const char *filename, QemuOpts *opts,
+static int coroutine_fn raw_co_create_opts(BlockDriver *drv,
+                                           const char *filename,
+                                           QemuOpts *opts,
                                            Error **errp)
 {
     BlockdevCreateOptions options;

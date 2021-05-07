@@ -7,8 +7,10 @@
  */
 
 #include "qemu/osdep.h"
+#include "hw/qdev-properties.h"
 #include "hw/virtio/virtio.h"
 #include "qapi/error.h"
+#include "qemu/module.h"
 #include "virtio-ccw.h"
 
 static Property vhost_vsock_ccw_properties[] = {
@@ -33,7 +35,7 @@ static void vhost_vsock_ccw_class_init(ObjectClass *klass, void *data)
 
     k->realize = vhost_vsock_ccw_realize;
     set_bit(DEVICE_CATEGORY_MISC, dc->categories);
-    dc->props = vhost_vsock_ccw_properties;
+    device_class_set_props(dc, vhost_vsock_ccw_properties);
 }
 
 static void vhost_vsock_ccw_instance_init(Object *obj)

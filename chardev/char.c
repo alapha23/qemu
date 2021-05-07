@@ -28,13 +28,16 @@
 #include "sysemu/sysemu.h"
 #include "qemu/config-file.h"
 #include "qemu/error-report.h"
+#include "qemu/qemu-print.h"
 #include "chardev/char.h"
 #include "qapi/error.h"
 #include "qapi/qapi-commands-char.h"
 #include "qapi/qmp/qerror.h"
 #include "sysemu/replay.h"
 #include "qemu/help_option.h"
+#include "qemu/module.h"
 #include "qemu/option.h"
+#include "qemu/id.h"
 
 #include "chardev/char-mux.h"
 
@@ -46,7 +49,7 @@ static Object *get_chardevs_root(void)
     return container_get(object_get_root(), "/chardevs");
 }
 
-static void chr_be_event(Chardev *s, int event)
+static void chr_be_event(Chardev *s, QEMUChrEvent event)
 {
     CharBackend *be = s->be;
 
@@ -57,7 +60,7 @@ static void chr_be_event(Chardev *s, int event)
     be->chr_event(be->opaque, event);
 }
 
-void qemu_chr_be_event(Chardev *s, int event)
+void qemu_chr_be_event(Chardev *s, QEMUChrEvent event)
 {
     /* Keep track if the char device is open */
     switch (event) {
@@ -67,6 +70,11 @@ void qemu_chr_be_event(Chardev *s, int event)
         case CHR_EVENT_CLOSED:
             s->be_open = 0;
             break;
+    case CHR_EVENT_BREAK:
+    case CHR_EVENT_MUX_IN:
+    case CHR_EVENT_MUX_OUT:
+        /* Ignore */
+        break;
     }
 
     CHARDEV_GET_CLASS(s)->chr_be_event(s, event);
@@ -193,6 +201,8 @@ void qemu_chr_be_update_read_handlers(Chardev *s,
 {
     ChardevClass *cc = CHARDEV_GET_CLASS(s);
 
+    assert(qemu_chr_has_feature(s, QEMU_CHAR_FEATURE_GCONTEXT)
+           || !context);
     s->gcontext = context;
     if (cc->chr_update_read_handler) {
         cc->chr_update_read_handler(s);
@@ -240,6 +250,15 @@ static void char_init(Object *obj)
 
     chr->logfd = -1;
     qemu_mutex_init(&chr->chr_write_lock);
+
+    /*
+     * Assume if chr_update_read_handler is implemented it will
+     * take the updated gcontext into account.
+     */
+    if (CHARDEV_GET_CLASS(chr)->chr_update_read_handler) {
+        qemu_chr_set_feature(chr, QEMU_CHAR_FEATURE_GCONTEXT);
+    }
+
 }
 
 static int null_chr_write(Chardev *chr, const uint8_t *buf, int len)
@@ -479,6 +498,8 @@ QemuOpts *qemu_chr_parse_compat(const char *label, const char *filename,
         return opts;
     }
 
+    error_report("'%s' is not a valid char driver", filename);
+
 fail:
     qemu_opts_del(opts);
     return NULL;
@@ -623,7 +644,8 @@ ChardevBackend *qemu_chr_parse_opts(QemuOpts *opts, Error **errp)
     return backend;
 }
 
-Chardev *qemu_chr_new_from_opts(QemuOpts *opts, Error **errp)
+Chardev *qemu_chr_new_from_opts(QemuOpts *opts, GMainContext *context,
+                                Error **errp)
 {
     const ChardevClass *cc;
     Chardev *chr = NULL;
@@ -637,7 +659,7 @@ Chardev *qemu_chr_new_from_opts(QemuOpts *opts, Error **errp)
 
         chardev_name_foreach(help_string_append, str);
 
-        error_printf("Available chardev backend types: %s\n", str->str);
+        qemu_printf("Available chardev backend types: %s\n", str->str);
         g_string_free(str, true);
         return NULL;
     }
@@ -663,7 +685,7 @@ Chardev *qemu_chr_new_from_opts(QemuOpts *opts, Error **errp)
 
     chr = qemu_chardev_new(bid ? bid : id,
                            object_class_get_name(OBJECT_CLASS(cc)),
-                           backend, errp);
+                           backend, context, errp);
 
     if (chr == NULL) {
         goto out;
@@ -676,7 +698,7 @@ Chardev *qemu_chr_new_from_opts(QemuOpts *opts, Error **errp)
         backend->type = CHARDEV_BACKEND_KIND_MUX;
         backend->u.mux.data = g_new0(ChardevMux, 1);
         backend->u.mux.data->chardev = g_strdup(bid);
-        mux = qemu_chardev_new(id, TYPE_CHARDEV_MUX, backend, errp);
+        mux = qemu_chardev_new(id, TYPE_CHARDEV_MUX, backend, context, errp);
         if (mux == NULL) {
             object_unparent(OBJECT(chr));
             chr = NULL;
@@ -692,7 +714,7 @@ out:
 }
 
 Chardev *qemu_chr_new_noreplay(const char *label, const char *filename,
-                               bool permit_mux_mon)
+                               bool permit_mux_mon, GMainContext *context)
 {
     const char *p;
     Chardev *chr;
@@ -707,7 +729,7 @@ Chardev *qemu_chr_new_noreplay(const char *label, const char *filename,
     if (!opts)
         return NULL;
 
-    chr = qemu_chr_new_from_opts(opts, &err);
+    chr = qemu_chr_new_from_opts(opts, context, &err);
     if (!chr) {
         error_report_err(err);
         goto out;
@@ -715,7 +737,13 @@ Chardev *qemu_chr_new_noreplay(const char *label, const char *filename,
 
     if (qemu_opt_get_bool(opts, "mux", 0)) {
         assert(permit_mux_mon);
-        monitor_init(chr, MONITOR_USE_READLINE);
+        monitor_init_hmp(chr, true, &err);
+        if (err) {
+            error_report_err(err);
+            object_unparent(OBJECT(chr));
+            chr = NULL;
+            goto out;
+        }
     }
 
 out:
@@ -725,10 +753,11 @@ out:
 
 static Chardev *qemu_chr_new_permit_mux_mon(const char *label,
                                           const char *filename,
-                                          bool permit_mux_mon)
+                                          bool permit_mux_mon,
+                                          GMainContext *context)
 {
     Chardev *chr;
-    chr = qemu_chr_new_noreplay(label, filename, permit_mux_mon);
+    chr = qemu_chr_new_noreplay(label, filename, permit_mux_mon, context);
     if (chr) {
         if (replay_mode != REPLAY_MODE_NONE) {
             qemu_chr_set_feature(chr, QEMU_CHAR_FEATURE_REPLAY);
@@ -742,14 +771,16 @@ static Chardev *qemu_chr_new_permit_mux_mon(const char *label,
     return chr;
 }
 
-Chardev *qemu_chr_new(const char *label, const char *filename)
+Chardev *qemu_chr_new(const char *label, const char *filename,
+                      GMainContext *context)
 {
-    return qemu_chr_new_permit_mux_mon(label, filename, false);
+    return qemu_chr_new_permit_mux_mon(label, filename, false, context);
 }
 
-Chardev *qemu_chr_new_mux_mon(const char *label, const char *filename)
+Chardev *qemu_chr_new_mux_mon(const char *label, const char *filename,
+                              GMainContext *context)
 {
-    return qemu_chr_new_permit_mux_mon(label, filename, true);
+    return qemu_chr_new_permit_mux_mon(label, filename, true, context);
 }
 
 static int qmp_query_chardev_foreach(Object *obj, void *data)
@@ -864,6 +895,9 @@ QemuOptsList qemu_chardev_opts = {
             .name = "tls-creds",
             .type = QEMU_OPT_STRING,
         },{
+            .name = "tls-authz",
+            .type = QEMU_OPT_STRING,
+        },{
             .name = "websocket",
             .type = QEMU_OPT_BOOL,
         },{
@@ -905,6 +939,13 @@ QemuOptsList qemu_chardev_opts = {
         },{
             .name = "logappend",
             .type = QEMU_OPT_BOOL,
+        },{
+            .name = "tight",
+            .type = QEMU_OPT_BOOL,
+            .def_value_str = "on",
+        },{
+            .name = "abstract",
+            .type = QEMU_OPT_BOOL,
         },
         { /* end of list */ }
     },
@@ -922,9 +963,10 @@ void qemu_chr_set_feature(Chardev *chr,
     return set_bit(feature, chr->features);
 }
 
-Chardev *qemu_chardev_new(const char *id, const char *typename,
-                          ChardevBackend *backend,
-                          Error **errp)
+static Chardev *chardev_new(const char *id, const char *typename,
+                            ChardevBackend *backend,
+                            GMainContext *gcontext,
+                            Error **errp)
 {
     Object *obj;
     Chardev *chr = NULL;
@@ -936,6 +978,7 @@ Chardev *qemu_chardev_new(const char *id, const char *typename,
     obj = object_new(typename);
     chr = CHARDEV(obj);
     chr->label = g_strdup(id);
+    chr->gcontext = gcontext;
 
     qemu_char_open(chr, backend, &be_opened, &local_err);
     if (local_err) {
@@ -950,10 +993,7 @@ Chardev *qemu_chardev_new(const char *id, const char *typename,
     }
 
     if (id) {
-        object_property_add_child(get_chardevs_root(), id, obj, &local_err);
-        if (local_err) {
-            goto end;
-        }
+        object_property_add_child(get_chardevs_root(), id, obj);
         object_unref(obj);
     }
 
@@ -965,6 +1005,21 @@ end:
     }
 
     return chr;
+}
+
+Chardev *qemu_chardev_new(const char *id, const char *typename,
+                          ChardevBackend *backend,
+                          GMainContext *gcontext,
+                          Error **errp)
+{
+    g_autofree char *genid = NULL;
+
+    if (!id) {
+        genid = id_generate(ID_CHR);
+        id = genid;
+    }
+
+    return chardev_new(id, typename, backend, gcontext, errp);
 }
 
 ChardevReturn *qmp_chardev_add(const char *id, ChardevBackend *backend,
@@ -979,8 +1034,8 @@ ChardevReturn *qmp_chardev_add(const char *id, ChardevBackend *backend,
         return NULL;
     }
 
-    chr = qemu_chardev_new(id, object_class_get_name(OBJECT_CLASS(cc)),
-                           backend, errp);
+    chr = chardev_new(id, object_class_get_name(OBJECT_CLASS(cc)),
+                      backend, NULL, errp);
     if (!chr) {
         return NULL;
     }
@@ -1037,8 +1092,8 @@ ChardevReturn *qmp_chardev_change(const char *id, ChardevBackend *backend,
         return NULL;
     }
 
-    chr_new = qemu_chardev_new(NULL, object_class_get_name(OBJECT_CLASS(cc)),
-                               backend, errp);
+    chr_new = chardev_new(NULL, object_class_get_name(OBJECT_CLASS(cc)),
+                          backend, chr->gcontext, errp);
     if (!chr_new) {
         return NULL;
     }
@@ -1065,7 +1120,7 @@ ChardevReturn *qmp_chardev_change(const char *id, ChardevBackend *backend,
 
     object_unparent(OBJECT(chr));
     object_property_add_child(get_chardevs_root(), chr_new->label,
-                              OBJECT(chr_new), &error_abort);
+                              OBJECT(chr_new));
     object_unref(OBJECT(chr_new));
 
     ret = g_new0(ChardevReturn, 1);

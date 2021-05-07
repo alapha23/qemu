@@ -25,7 +25,9 @@
 #define HW_IDE_AHCI_INTERNAL_H
 
 #include "hw/ide/ahci.h"
+#include "hw/ide/internal.h"
 #include "hw/sysbus.h"
+#include "hw/pci/pci.h"
 
 #define AHCI_MEM_BAR_SIZE         0x1000
 #define AHCI_MAX_PORTS            32
@@ -394,4 +396,4 @@ void ahci_reset(AHCIState *s);
 
 #define SYSBUS_AHCI(obj) OBJECT_CHECK(SysbusAHCIState, (obj), TYPE_SYSBUS_AHCI)
 
-#endif /* HW_IDE_AHCI_H */
+#endif /* HW_IDE_AHCI_INTERNAL_H */

@@ -22,10 +22,13 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+
 #include "qemu/osdep.h"
-#include "hw/hw.h"
 #include "hw/ppc/mac.h"
 #include "hw/ppc/mac_dbdma.h"
+#include "hw/qdev-properties.h"
+#include "migration/vmstate.h"
+#include "qemu/module.h"
 #include "hw/misc/macio/macio.h"
 #include "sysemu/block-backend.h"
 #include "sysemu/dma.h"
@@ -373,7 +376,7 @@ static void macio_ide_reset(DeviceState *dev)
     ide_bus_reset(&d->bus);
 }
 
-static int ide_nop_int(IDEDMA *dma, int x)
+static int ide_nop_int(IDEDMA *dma, bool is_write)
 {
     return 0;
 }
@@ -456,7 +459,7 @@ static void macio_ide_initfn(Object *obj)
 
     object_property_add_link(obj, "dbdma", TYPE_MAC_DBDMA,
                              (Object **) &s->dbdma,
-                             qdev_prop_allow_set_link_before_realize, 0, NULL);
+                             qdev_prop_allow_set_link_before_realize, 0);
 }
 
 static Property macio_ide_properties[] = {
@@ -471,7 +474,7 @@ static void macio_ide_class_init(ObjectClass *oc, void *data)
 
     dc->realize = macio_ide_realizefn;
     dc->reset = macio_ide_reset;
-    dc->props = macio_ide_properties;
+    device_class_set_props(dc, macio_ide_properties);
     dc->vmsd = &vmstate_pmac;
     set_bit(DEVICE_CATEGORY_STORAGE, dc->categories);
 }

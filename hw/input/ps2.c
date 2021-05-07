@@ -21,13 +21,15 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+
 #include "qemu/osdep.h"
 #include "qemu/log.h"
-#include "hw/hw.h"
 #include "hw/input/ps2.h"
+#include "migration/vmstate.h"
 #include "ui/console.h"
 #include "ui/input.h"
-#include "sysemu/sysemu.h"
+#include "sysemu/reset.h"
+#include "sysemu/runstate.h"
 
 #include "trace.h"
 
@@ -47,6 +49,8 @@
 #define KBD_CMD_RESET_DISABLE	0xF5	/* reset and disable scanning */
 #define KBD_CMD_RESET_ENABLE   	0xF6    /* reset and enable scanning */
 #define KBD_CMD_RESET		0xFF	/* Reset */
+#define KBD_CMD_SET_MAKE_BREAK  0xFC    /* Set Make and Break mode */
+#define KBD_CMD_SET_TYPEMATIC   0xFA    /* Set Typematic Make and Break mode */
 
 /* Keyboard Replies */
 #define KBD_REPLY_POR		0xAA	/* Power on reset */
@@ -188,6 +192,11 @@ static void ps2_reset_queue(PS2State *s)
     q->count = 0;
 }
 
+int ps2_queue_empty(PS2State *s)
+{
+    return s->queue.count == 0;
+}
+
 void ps2_queue_noirq(PS2State *s, int b)
 {
     PS2Queue *q = &s->queue;
@@ -255,7 +264,7 @@ static void ps2_put_keycode(void *opaque, int keycode)
     PS2KbdState *s = opaque;
 
     trace_ps2_put_keycode(opaque, keycode);
-    qemu_system_wakeup_request(QEMU_WAKEUP_REASON_OTHER);
+    qemu_system_wakeup_request(QEMU_WAKEUP_REASON_OTHER, NULL);
 
     if (s->translate) {
         if (keycode == 0xf0) {
@@ -285,7 +294,7 @@ static void ps2_keyboard_event(DeviceState *dev, QemuConsole *src,
         return;
     }
 
-    qemu_system_wakeup_request(QEMU_WAKEUP_REASON_OTHER);
+    qemu_system_wakeup_request(QEMU_WAKEUP_REASON_OTHER, NULL);
     assert(evt->type == INPUT_EVENT_KIND_KEY);
     qcode = qemu_input_key_value_to_qcode(key->key);
 
@@ -571,6 +580,7 @@ void ps2_write_keyboard(void *opaque, int val)
         case KBD_CMD_SCANCODE:
         case KBD_CMD_SET_LEDS:
         case KBD_CMD_SET_RATE:
+        case KBD_CMD_SET_MAKE_BREAK:
             s->common.write_cmd = val;
             ps2_queue(&s->common, KBD_REPLY_ACK);
             break;
@@ -590,10 +600,17 @@ void ps2_write_keyboard(void *opaque, int val)
                 KBD_REPLY_ACK,
                 KBD_REPLY_POR);
             break;
+        case KBD_CMD_SET_TYPEMATIC:
+            ps2_queue(&s->common, KBD_REPLY_ACK);
+            break;
         default:
             ps2_queue(&s->common, KBD_REPLY_RESEND);
             break;
         }
+        break;
+    case KBD_CMD_SET_MAKE_BREAK:
+        ps2_queue(&s->common, KBD_REPLY_ACK);
+        s->common.write_cmd = -1;
         break;
     case KBD_CMD_SCANCODE:
         if (val == 0) {
@@ -748,7 +765,7 @@ static void ps2_mouse_sync(DeviceState *dev)
     }
 
     if (s->mouse_buttons) {
-        qemu_system_wakeup_request(QEMU_WAKEUP_REASON_OTHER);
+        qemu_system_wakeup_request(QEMU_WAKEUP_REASON_OTHER, NULL);
     }
     if (!(s->mouse_status & MOUSE_STATUS_REMOTE)) {
         /* if not remote, send event. Multiple events are sent if
@@ -942,7 +959,7 @@ static void ps2_kbd_reset(void *opaque)
 
     trace_ps2_kbd_reset(opaque);
     ps2_common_reset(&s->common);
-    s->scan_enabled = 0;
+    s->scan_enabled = 1;
     s->translate = 0;
     s->scancode_set = 2;
     s->modifiers = 0;

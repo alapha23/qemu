@@ -44,16 +44,16 @@
  * 0001:03:0e.0 FireWire (IEEE 1394) [0c00]: Apple Computer Inc. K2 FireWire [106b:0042]
  * 0001:04:0f.0 Ethernet controller [0200]: Apple Computer Inc. K2 GMAC (Sun GEM) [106b:004c]
  * 0001:05:0c.0 IDE interface [0101]: Broadcom K2 SATA [1166:0240]
- *
  */
+
 #include "qemu/osdep.h"
+#include "qemu-common.h"
 #include "qapi/error.h"
-#include "hw/hw.h"
 #include "hw/ppc/ppc.h"
+#include "hw/qdev-properties.h"
 #include "hw/ppc/mac.h"
 #include "hw/input/adb.h"
 #include "hw/ppc/mac_dbdma.h"
-#include "hw/timer/m48t59.h"
 #include "hw/pci/pci.h"
 #include "net/net.h"
 #include "sysemu/sysemu.h"
@@ -62,12 +62,12 @@
 #include "hw/char/escc.h"
 #include "hw/misc/macio/macio.h"
 #include "hw/ppc/openpic.h"
-#include "hw/ide.h"
 #include "hw/loader.h"
 #include "hw/fw-path-provider.h"
 #include "elf.h"
 #include "qemu/error-report.h"
 #include "sysemu/kvm.h"
+#include "sysemu/reset.h"
 #include "kvm_ppc.h"
 #include "hw/usb.h"
 #include "exec/address-spaces.h"
@@ -115,9 +115,9 @@ static void ppc_core99_init(MachineState *machine)
     PowerPCCPU *cpu = NULL;
     CPUPPCState *env = NULL;
     char *filename;
-    qemu_irq **openpic_irqs;
+    IrqLines *openpic_irqs;
     int linux_boot, i, j, k;
-    MemoryRegion *ram = g_new(MemoryRegion, 1), *bios = g_new(MemoryRegion, 1);
+    MemoryRegion *bios = g_new(MemoryRegion, 1);
     hwaddr kernel_base, initrd_base, cmdline_base = 0;
     long kernel_size, initrd_size;
     UNINHostState *uninorth_pci;
@@ -127,8 +127,7 @@ static void ppc_core99_init(MachineState *machine)
     MACIOIDEState *macio_ide;
     BusState *adb_bus;
     MacIONVRAMState *nvr;
-    int bios_size, ndrv_size;
-    uint8_t *ndrv_file;
+    int bios_size;
     int ppc_boot_device;
     DriveInfo *hd[MAX_IDE_BUS * MAX_IDE_DEVS];
     void *fw_cfg;
@@ -137,6 +136,7 @@ static void ppc_core99_init(MachineState *machine)
     DeviceState *dev, *pic_dev;
     hwaddr nvram_addr = 0xFFF04000;
     uint64_t tbfreq;
+    unsigned int smp_cpus = machine->smp.cpus;
 
     linux_boot = (kernel_filename != NULL);
 
@@ -151,23 +151,21 @@ static void ppc_core99_init(MachineState *machine)
     }
 
     /* allocate RAM */
-    memory_region_allocate_system_memory(ram, NULL, "ppc_core99.ram", ram_size);
-    memory_region_add_subregion(get_system_memory(), 0, ram);
+    memory_region_add_subregion(get_system_memory(), 0, machine->ram);
 
     /* allocate and load BIOS */
-    memory_region_init_ram(bios, NULL, "ppc_core99.bios", BIOS_SIZE,
+    memory_region_init_rom(bios, NULL, "ppc_core99.bios", BIOS_SIZE,
                            &error_fatal);
 
     if (bios_name == NULL)
         bios_name = PROM_FILENAME;
     filename = qemu_find_file(QEMU_FILE_TYPE_BIOS, bios_name);
-    memory_region_set_readonly(bios, true);
     memory_region_add_subregion(get_system_memory(), PROM_ADDR, bios);
 
     /* Load OpenBIOS (ELF) */
     if (filename) {
-        bios_size = load_elf(filename, NULL, NULL, NULL,
-                             NULL, NULL, 1, PPC_ELF_MACHINE, 0, 0);
+        bios_size = load_elf(filename, NULL, NULL, NULL, NULL,
+                             NULL, NULL, NULL, 1, PPC_ELF_MACHINE, 0, 0);
 
         g_free(filename);
     } else {
@@ -189,8 +187,9 @@ static void ppc_core99_init(MachineState *machine)
 #endif
         kernel_base = KERNEL_LOAD_ADDR;
 
-        kernel_size = load_elf(kernel_filename, translate_kernel_address, NULL,
-                               NULL, &lowaddr, NULL, 1, PPC_ELF_MACHINE,
+        kernel_size = load_elf(kernel_filename, NULL,
+                               translate_kernel_address, NULL,
+                               NULL, &lowaddr, NULL, NULL, 1, PPC_ELF_MACHINE,
                                0, 0);
         if (kernel_size < 0)
             kernel_size = load_aout(kernel_filename, kernel_base,
@@ -249,41 +248,37 @@ static void ppc_core99_init(MachineState *machine)
     memory_region_add_subregion(get_system_memory(), 0xf8000000,
                                 sysbus_mmio_get_region(s, 0));
 
-    openpic_irqs = g_malloc0(smp_cpus * sizeof(qemu_irq *));
-    openpic_irqs[0] =
-        g_malloc0(smp_cpus * sizeof(qemu_irq) * OPENPIC_OUTPUT_NB);
+    openpic_irqs = g_new0(IrqLines, smp_cpus);
     for (i = 0; i < smp_cpus; i++) {
         /* Mac99 IRQ connection between OpenPIC outputs pins
          * and PowerPC input pins
          */
         switch (PPC_INPUT(env)) {
         case PPC_FLAGS_INPUT_6xx:
-            openpic_irqs[i] = openpic_irqs[0] + (i * OPENPIC_OUTPUT_NB);
-            openpic_irqs[i][OPENPIC_OUTPUT_INT] =
+            openpic_irqs[i].irq[OPENPIC_OUTPUT_INT] =
                 ((qemu_irq *)env->irq_inputs)[PPC6xx_INPUT_INT];
-            openpic_irqs[i][OPENPIC_OUTPUT_CINT] =
+            openpic_irqs[i].irq[OPENPIC_OUTPUT_CINT] =
                 ((qemu_irq *)env->irq_inputs)[PPC6xx_INPUT_INT];
-            openpic_irqs[i][OPENPIC_OUTPUT_MCK] =
+            openpic_irqs[i].irq[OPENPIC_OUTPUT_MCK] =
                 ((qemu_irq *)env->irq_inputs)[PPC6xx_INPUT_MCP];
             /* Not connected ? */
-            openpic_irqs[i][OPENPIC_OUTPUT_DEBUG] = NULL;
+            openpic_irqs[i].irq[OPENPIC_OUTPUT_DEBUG] = NULL;
             /* Check this */
-            openpic_irqs[i][OPENPIC_OUTPUT_RESET] =
+            openpic_irqs[i].irq[OPENPIC_OUTPUT_RESET] =
                 ((qemu_irq *)env->irq_inputs)[PPC6xx_INPUT_HRESET];
             break;
 #if defined(TARGET_PPC64)
         case PPC_FLAGS_INPUT_970:
-            openpic_irqs[i] = openpic_irqs[0] + (i * OPENPIC_OUTPUT_NB);
-            openpic_irqs[i][OPENPIC_OUTPUT_INT] =
+            openpic_irqs[i].irq[OPENPIC_OUTPUT_INT] =
                 ((qemu_irq *)env->irq_inputs)[PPC970_INPUT_INT];
-            openpic_irqs[i][OPENPIC_OUTPUT_CINT] =
+            openpic_irqs[i].irq[OPENPIC_OUTPUT_CINT] =
                 ((qemu_irq *)env->irq_inputs)[PPC970_INPUT_INT];
-            openpic_irqs[i][OPENPIC_OUTPUT_MCK] =
+            openpic_irqs[i].irq[OPENPIC_OUTPUT_MCK] =
                 ((qemu_irq *)env->irq_inputs)[PPC970_INPUT_MCP];
             /* Not connected ? */
-            openpic_irqs[i][OPENPIC_OUTPUT_DEBUG] = NULL;
+            openpic_irqs[i].irq[OPENPIC_OUTPUT_DEBUG] = NULL;
             /* Check this */
-            openpic_irqs[i][OPENPIC_OUTPUT_RESET] =
+            openpic_irqs[i].irq[OPENPIC_OUTPUT_RESET] =
                 ((qemu_irq *)env->irq_inputs)[PPC970_INPUT_HRESET];
             break;
 #endif /* defined(TARGET_PPC64) */
@@ -300,7 +295,7 @@ static void ppc_core99_init(MachineState *machine)
     k = 0;
     for (i = 0; i < smp_cpus; i++) {
         for (j = 0; j < OPENPIC_OUTPUT_NB; j++) {
-            sysbus_connect_irq(s, k++, openpic_irqs[i][j]);
+            sysbus_connect_irq(s, k++, openpic_irqs[i].irq[j]);
         }
     }
     g_free(openpic_irqs);
@@ -437,17 +432,15 @@ static void ppc_core99_init(MachineState *machine)
     }
 
     for (i = 0; i < nb_nics; i++) {
-        pci_nic_init_nofail(&nd_table[i], pci_bus, "ne2k_pci", NULL);
+        pci_nic_init_nofail(&nd_table[i], pci_bus, "sungem", NULL);
     }
 
     /* The NewWorld NVRAM is not located in the MacIO device */
-#ifdef CONFIG_KVM
-    if (kvm_enabled() && getpagesize() > 4096) {
+    if (kvm_enabled() && qemu_real_host_page_size > 4096) {
         /* We can't combine read-write and read-only in a single page, so
            move the NVRAM out of ROM again for KVM */
         nvram_addr = 0xFFE00000;
     }
-#endif
     dev = qdev_create(NULL, TYPE_MACIO_NVRAM);
     qdev_prop_set_uint32(dev, "size", 0x2000);
     qdev_prop_set_uint32(dev, "it_shift", 1);
@@ -462,14 +455,14 @@ static void ppc_core99_init(MachineState *machine)
     qdev_prop_set_uint32(dev, "data_width", 1);
     qdev_prop_set_bit(dev, "dma_enabled", false);
     object_property_add_child(OBJECT(qdev_get_machine()), TYPE_FW_CFG,
-                              OBJECT(fw_cfg), NULL);
+                              OBJECT(fw_cfg));
     qdev_init_nofail(dev);
     s = SYS_BUS_DEVICE(dev);
     sysbus_mmio_map(s, 0, CFG_ADDR);
     sysbus_mmio_map(s, 1, CFG_ADDR + 2);
 
     fw_cfg_add_i16(fw_cfg, FW_CFG_NB_CPUS, (uint16_t)smp_cpus);
-    fw_cfg_add_i16(fw_cfg, FW_CFG_MAX_CPUS, (uint16_t)max_cpus);
+    fw_cfg_add_i16(fw_cfg, FW_CFG_MAX_CPUS, (uint16_t)machine->smp.max_cpus);
     fw_cfg_add_i64(fw_cfg, FW_CFG_RAM_SIZE, (uint64_t)ram_size);
     fw_cfg_add_i16(fw_cfg, FW_CFG_MACHINE_ID, machine_arch);
     fw_cfg_add_i32(fw_cfg, FW_CFG_KERNEL_ADDR, kernel_base);
@@ -492,14 +485,12 @@ static void ppc_core99_init(MachineState *machine)
 
     fw_cfg_add_i32(fw_cfg, FW_CFG_PPC_IS_KVM, kvm_enabled());
     if (kvm_enabled()) {
-#ifdef CONFIG_KVM
         uint8_t *hypercall;
 
         hypercall = g_malloc(16);
         kvmppc_get_hypercall(env, hypercall, 16);
         fw_cfg_add_bytes(fw_cfg, FW_CFG_PPC_KVM_HC, hypercall, 16);
         fw_cfg_add_i32(fw_cfg, FW_CFG_PPC_KVM_PID, getpid());
-#endif
     }
     fw_cfg_add_i32(fw_cfg, FW_CFG_PPC_TBFREQ, tbfreq);
     /* Mac OS X requires a "known good" clock-frequency value; pass it one. */
@@ -510,11 +501,10 @@ static void ppc_core99_init(MachineState *machine)
     /* MacOS NDRV VGA driver */
     filename = qemu_find_file(QEMU_FILE_TYPE_BIOS, NDRV_VGA_FILENAME);
     if (filename) {
-        ndrv_size = get_image_size(filename);
-        if (ndrv_size != -1) {
-            ndrv_file = g_malloc(ndrv_size);
-            ndrv_size = load_image(filename, ndrv_file);
+        gchar *ndrv_file;
+        gsize ndrv_size;
 
+        if (g_file_get_contents(filename, &ndrv_file, &ndrv_size, NULL)) {
             fw_cfg_add_file(fw_cfg, "ndrv/qemu_vga.ndrv", ndrv_file, ndrv_size);
         }
         g_free(filename);
@@ -553,11 +543,11 @@ static char *core99_fw_dev_path(FWPathProvider *p, BusState *bus,
             return g_strdup("cdrom");
         }
 
-        return g_strdup("hd");
+        return g_strdup("disk");
     }
 
     if (!strcmp(object_get_typename(OBJECT(dev)), "ide-hd")) {
-        return g_strdup("hd");
+        return g_strdup("disk");
     }
 
     if (!strcmp(object_get_typename(OBJECT(dev)), "ide-cd")) {
@@ -570,8 +560,7 @@ static char *core99_fw_dev_path(FWPathProvider *p, BusState *bus,
 
     return NULL;
 }
-
-static int core99_kvm_type(const char *arg)
+static int core99_kvm_type(MachineState *machine, const char *arg)
 {
     /* Always force PR KVM */
     return 2;
@@ -594,6 +583,7 @@ static void core99_machine_class_init(ObjectClass *oc, void *data)
 #else
     mc->default_cpu_type = POWERPC_CPU_TYPE_NAME("7400_v2.9");
 #endif
+    mc->default_ram_id = "ppc_core99.ram";
     mc->ignore_boot_device_suffixes = true;
     fwc->get_dev_path = core99_fw_dev_path;
 }
@@ -638,11 +628,10 @@ static void core99_instance_init(Object *obj)
     /* Default via_config is CORE99_VIA_CONFIG_CUDA */
     cms->via_config = CORE99_VIA_CONFIG_CUDA;
     object_property_add_str(obj, "via", core99_get_via_config,
-                            core99_set_via_config, NULL);
+                            core99_set_via_config);
     object_property_set_description(obj, "via",
                                     "Set VIA configuration. "
-                                    "Valid values are cuda, pmu and pmu-adb",
-                                    NULL);
+                                    "Valid values are cuda, pmu and pmu-adb");
 
     return;
 }

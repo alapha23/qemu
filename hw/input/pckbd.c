@@ -21,23 +21,18 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+
 #include "qemu/osdep.h"
 #include "qemu/log.h"
-#include "hw/hw.h"
 #include "hw/isa/isa.h"
-#include "hw/i386/pc.h"
+#include "migration/vmstate.h"
 #include "hw/input/ps2.h"
+#include "hw/irq.h"
 #include "hw/input/i8042.h"
-#include "sysemu/sysemu.h"
+#include "sysemu/reset.h"
+#include "sysemu/runstate.h"
 
-/* debug PC keyboard */
-//#define DEBUG_KBD
-#ifdef DEBUG_KBD
-#define DPRINTF(fmt, ...)                                       \
-    do { printf("KBD: " fmt , ## __VA_ARGS__); } while (0)
-#else
-#define DPRINTF(fmt, ...)
-#endif
+#include "trace.h"
 
 /*	Keyboard Controller Commands */
 #define KBD_CCMD_READ_MODE	0x20	/* Read mode bits */
@@ -55,7 +50,7 @@
 #define KBD_CCMD_WRITE_OUTPORT	0xD1    /* write output port */
 #define KBD_CCMD_WRITE_OBUF	0xD2
 #define KBD_CCMD_WRITE_AUX_OBUF	0xD3    /* Write to output buffer as if
-					   initiated by the auxiliary device */
+                                           initiated by the auxiliary device */
 #define KBD_CCMD_WRITE_MOUSE	0xD4	/* Write the following byte to the mouse */
 #define KBD_CCMD_DISABLE_A20    0xDD    /* HP vectra only ? */
 #define KBD_CCMD_ENABLE_A20     0xDF    /* HP vectra only ? */
@@ -210,7 +205,7 @@ static uint64_t kbd_read_status(void *opaque, hwaddr addr,
     KBDState *s = opaque;
     int val;
     val = s->status;
-    DPRINTF("kbd: read status=0x%02x\n", val);
+    trace_pckbd_kbd_read_status(val);
     return val;
 }
 
@@ -224,7 +219,7 @@ static void kbd_queue(KBDState *s, int b, int aux)
 
 static void outport_write(KBDState *s, uint32_t val)
 {
-    DPRINTF("kbd: write outport=0x%02x\n", val);
+    trace_pckbd_outport_write(val);
     s->outport = val;
     qemu_set_irq(s->a20_out, (val >> 1) & 1);
     if (!(val & 1)) {
@@ -237,7 +232,7 @@ static void kbd_write_command(void *opaque, hwaddr addr,
 {
     KBDState *s = opaque;
 
-    DPRINTF("kbd: write cmd=0x%02" PRIx64 "\n", val);
+    trace_pckbd_kbd_write_command(val);
 
     /* Bits 3-0 of the output port P2 of the keyboard controller may be pulsed
      * low for approximately 6 micro seconds. Bits 3-0 of the KBD_CCMD_PULSE
@@ -326,7 +321,7 @@ static uint64_t kbd_read_data(void *opaque, hwaddr addr,
     else
         val = ps2_read_data(s->kbd);
 
-    DPRINTF("kbd: read data=0x%02x\n", val);
+    trace_pckbd_kbd_read_data(val);
     return val;
 }
 
@@ -335,7 +330,7 @@ static void kbd_write_data(void *opaque, hwaddr addr,
 {
     KBDState *s = opaque;
 
-    DPRINTF("kbd: write data=0x%02" PRIx64 "\n", val);
+    trace_pckbd_kbd_write_data(val);
 
     switch(s->write_cmd) {
     case 0:
@@ -487,17 +482,15 @@ void i8042_mm_init(qemu_irq kbd_irq, qemu_irq mouse_irq,
 
 #define I8042(obj) OBJECT_CHECK(ISAKBDState, (obj), TYPE_I8042)
 
-typedef struct ISAKBDState {
+struct ISAKBDState {
     ISADevice parent_obj;
 
     KBDState kbd;
     MemoryRegion io[2];
-} ISAKBDState;
+};
 
-void i8042_isa_mouse_fake_event(void *opaque)
+void i8042_isa_mouse_fake_event(ISAKBDState *isa)
 {
-    ISADevice *dev = opaque;
-    ISAKBDState *isa = I8042(dev);
     KBDState *s = &isa->kbd;
 
     ps2_mouse_fake_event(s->mouse);
@@ -574,6 +567,7 @@ static void i8042_class_initfn(ObjectClass *klass, void *data)
 
     dc->realize = i8042_realizefn;
     dc->vmsd = &vmstate_kbd_isa;
+    set_bit(DEVICE_CATEGORY_INPUT, dc->categories);
 }
 
 static const TypeInfo i8042_info = {

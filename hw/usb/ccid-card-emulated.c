@@ -31,7 +31,9 @@
 
 #include "qemu/thread.h"
 #include "qemu/main-loop.h"
+#include "qemu/module.h"
 #include "ccid.h"
+#include "hw/qdev-properties.h"
 #include "qapi/error.h"
 
 #define DPRINTF(card, lvl, fmt, ...) \
@@ -119,11 +121,11 @@ struct EmulatedState {
     char    *db;
     uint8_t  atr[MAX_ATR_SIZE];
     uint8_t  atr_length;
-    QSIMPLEQ_HEAD(event_list, EmulEvent) event_list;
+    QSIMPLEQ_HEAD(, EmulEvent) event_list;
     QemuMutex event_list_mutex;
     QemuThread event_thread_id;
     VReader *reader;
-    QSIMPLEQ_HEAD(guest_apdu_list, EmulEvent) guest_apdu_list;
+    QSIMPLEQ_HEAD(, EmulEvent) guest_apdu_list;
     QemuMutex vreader_mutex; /* and guest_apdu_list mutex */
     QemuMutex handle_apdu_mutex;
     QemuCond handle_apdu_cond;
@@ -549,6 +551,8 @@ static void emulated_realize(CCIDCardState *base, Error **errp)
     qemu_thread_create(&card->apdu_thread_id, "ccid/apdu", handle_apdu_thread,
                        card, QEMU_THREAD_JOINABLE);
 
+    return;
+
 out2:
     clean_event_notifier(card);
 out1:
@@ -558,7 +562,7 @@ out1:
     qemu_mutex_destroy(&card->event_list_mutex);
 }
 
-static void emulated_unrealize(CCIDCardState *base, Error **errp)
+static void emulated_unrealize(CCIDCardState *base)
 {
     EmulatedState *card = EMULATED_CCID_CARD(base);
     VEvent *vevent = vevent_new(VEVENT_LAST, NULL, NULL);
@@ -599,7 +603,7 @@ static void emulated_class_initfn(ObjectClass *klass, void *data)
     cc->apdu_from_guest = emulated_apdu_from_guest;
     set_bit(DEVICE_CATEGORY_INPUT, dc->categories);
     dc->desc = "emulated smartcard";
-    dc->props = emulated_card_properties;
+    device_class_set_props(dc, emulated_card_properties);
 }
 
 static const TypeInfo emulated_card_info = {

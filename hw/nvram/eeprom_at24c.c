@@ -10,8 +10,9 @@
 #include "qemu/osdep.h"
 
 #include "qapi/error.h"
-#include "hw/hw.h"
+#include "qemu/module.h"
 #include "hw/i2c/i2c.h"
+#include "hw/qdev-properties.h"
 #include "sysemu/block-backend.h"
 
 /* #define DEBUG_AT24C */
@@ -74,10 +75,10 @@ int at24c_eeprom_event(I2CSlave *s, enum i2c_event event)
 }
 
 static
-int at24c_eeprom_recv(I2CSlave *s)
+uint8_t at24c_eeprom_recv(I2CSlave *s)
 {
     EEPROMState *ee = AT24C_EE(s);
-    int ret;
+    uint8_t ret;
 
     ret = ee->mem[ee->cur];
 
@@ -181,7 +182,7 @@ void at24c_eeprom_class_init(ObjectClass *klass, void *data)
     k->recv = &at24c_eeprom_recv;
     k->send = &at24c_eeprom_send;
 
-    dc->props = at24c_eeprom_props;
+    device_class_set_props(dc, at24c_eeprom_props);
     dc->reset = at24c_eeprom_reset;
 }
 

@@ -3,7 +3,7 @@
 
 /* Devices attached directly to the main system bus.  */
 
-#include "hw/qdev.h"
+#include "hw/qdev-core.h"
 #include "exec/memory.h"
 
 #define QDEV_MAX_MMIO 32
@@ -24,10 +24,6 @@ typedef struct SysBusDevice SysBusDevice;
 
 /**
  * SysBusDeviceClass:
- * @init: Callback function invoked when the #DeviceState.realized property
- * is changed to %true. Deprecated, new types inheriting directly from
- * TYPE_SYS_BUS_DEVICE should use #DeviceClass.realize instead, new leaf
- * types should consult their respective parent type.
  *
  * SysBusDeviceClass is not overriding #DeviceClass.realize, so derived
  * classes overriding it are not required to invoke its implementation.
@@ -38,9 +34,6 @@ typedef struct SysBusDevice SysBusDevice;
 typedef struct SysBusDeviceClass {
     /*< private >*/
     DeviceClass parent_class;
-    /*< public >*/
-
-    int (*init)(SysBusDevice *dev);
 
     /*
      * Let the sysbus device format its own non-PIO, non-MMIO unit address.
@@ -92,6 +85,7 @@ qemu_irq sysbus_get_connected_irq(SysBusDevice *dev, int n);
 void sysbus_mmio_map(SysBusDevice *dev, int n, hwaddr addr);
 void sysbus_mmio_map_overlap(SysBusDevice *dev, int n, hwaddr addr,
                              int priority);
+void sysbus_mmio_unmap(SysBusDevice *dev, int n);
 void sysbus_add_io(SysBusDevice *dev, hwaddr addr,
                    MemoryRegion *mem);
 MemoryRegion *sysbus_address_space(SysBusDevice *dev);
@@ -119,8 +113,7 @@ void foreach_dynamic_sysbus_device(FindSysbusDeviceFunc *func, void *opaque);
 /* Legacy helper function for creating devices.  */
 DeviceState *sysbus_create_varargs(const char *name,
                                  hwaddr addr, ...);
-DeviceState *sysbus_try_create_varargs(const char *name,
-                                       hwaddr addr, ...);
+
 static inline DeviceState *sysbus_create_simple(const char *name,
                                               hwaddr addr,
                                               qemu_irq irq)
@@ -128,11 +121,5 @@ static inline DeviceState *sysbus_create_simple(const char *name,
     return sysbus_create_varargs(name, addr, irq, NULL);
 }
 
-static inline DeviceState *sysbus_try_create_simple(const char *name,
-                                                    hwaddr addr,
-                                                    qemu_irq irq)
-{
-    return sysbus_try_create_varargs(name, addr, irq, NULL);
-}
 
 #endif /* HW_SYSBUS_H */

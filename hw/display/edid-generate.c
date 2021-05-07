@@ -5,7 +5,6 @@
  * See the COPYING file in the top-level directory.
  */
 #include "qemu/osdep.h"
-#include "qemu-common.h"
 #include "qemu/bswap.h"
 #include "hw/display/edid.h"
 
@@ -361,8 +360,8 @@ void qemu_edid_generate(uint8_t *edid, size_t size,
     edid[20] = 0xa5;
 
     /* screen size: undefined */
-    edid[21] = info->prefx * info->dpi / 2540;
-    edid[22] = info->prefy * info->dpi / 2540;
+    edid[21] = info->prefx * 254 / 100 / info->dpi;
+    edid[22] = info->prefy * 254 / 100 / info->dpi;
 
     /* display gamma: 2.2 */
     edid[23] = 220 - 100;

@@ -21,12 +21,15 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+
 #include "qemu/osdep.h"
-#include "hw/hw.h"
+#include "qapi/error.h"
 #include "ui/console.h"
-#include "hw/i386/pc.h"
 #include "hw/input/i8042.h"
-#include "hw/qdev.h"
+#include "hw/qdev-properties.h"
+#include "migration/vmstate.h"
+#include "vmport.h"
+#include "cpu.h"
 
 /* debug only vmmouse */
 //#define DEBUG_VMMOUSE
@@ -65,8 +68,28 @@ typedef struct VMMouseState
     uint16_t status;
     uint8_t absolute;
     QEMUPutMouseEntry *entry;
-    void *ps2_mouse;
+    ISAKBDState *i8042;
 } VMMouseState;
+
+static void vmmouse_get_data(uint32_t *data)
+{
+    X86CPU *cpu = X86_CPU(current_cpu);
+    CPUX86State *env = &cpu->env;
+
+    data[0] = env->regs[R_EAX]; data[1] = env->regs[R_EBX];
+    data[2] = env->regs[R_ECX]; data[3] = env->regs[R_EDX];
+    data[4] = env->regs[R_ESI]; data[5] = env->regs[R_EDI];
+}
+
+static void vmmouse_set_data(const uint32_t *data)
+{
+    X86CPU *cpu = X86_CPU(current_cpu);
+    CPUX86State *env = &cpu->env;
+
+    env->regs[R_EAX] = data[0]; env->regs[R_EBX] = data[1];
+    env->regs[R_ECX] = data[2]; env->regs[R_EDX] = data[3];
+    env->regs[R_ESI] = data[4]; env->regs[R_EDI] = data[5];
+}
 
 static uint32_t vmmouse_get_status(VMMouseState *s)
 {
@@ -104,7 +127,7 @@ static void vmmouse_mouse_event(void *opaque, int x, int y, int dz, int buttons_
 
     /* need to still generate PS2 events to notify driver to
        read from queue */
-    i8042_isa_mouse_fake_event(s->ps2_mouse);
+    i8042_isa_mouse_fake_event(s->i8042);
 }
 
 static void vmmouse_remove_handler(VMMouseState *s)
@@ -257,6 +280,7 @@ static void vmmouse_reset(DeviceState *d)
     VMMouseState *s = VMMOUSE(d);
 
     s->queue_size = VMMOUSE_QUEUE_SIZE;
+    s->nb_queue = 0;
 
     vmmouse_disable(s);
 }
@@ -267,13 +291,18 @@ static void vmmouse_realizefn(DeviceState *dev, Error **errp)
 
     DPRINTF("vmmouse_init\n");
 
+    if (!object_resolve_path_type("", TYPE_VMPORT, NULL)) {
+        error_setg(errp, "vmmouse needs a machine with vmport");
+        return;
+    }
+
     vmport_register(VMMOUSE_STATUS, vmmouse_ioport_read, s);
     vmport_register(VMMOUSE_COMMAND, vmmouse_ioport_read, s);
     vmport_register(VMMOUSE_DATA, vmmouse_ioport_read, s);
 }
 
 static Property vmmouse_properties[] = {
-    DEFINE_PROP_PTR("ps2_mouse", VMMouseState, ps2_mouse),
+    DEFINE_PROP_LINK("i8042", VMMouseState, i8042, TYPE_I8042, ISAKBDState *),
     DEFINE_PROP_END_OF_LIST(),
 };
 
@@ -284,9 +313,7 @@ static void vmmouse_class_initfn(ObjectClass *klass, void *data)
     dc->realize = vmmouse_realizefn;
     dc->reset = vmmouse_reset;
     dc->vmsd = &vmstate_vmmouse;
-    dc->props = vmmouse_properties;
-    /* Reason: pointer property "ps2_mouse" */
-    dc->user_creatable = false;
+    device_class_set_props(dc, vmmouse_properties);
 }
 
 static const TypeInfo vmmouse_info = {

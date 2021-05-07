@@ -18,13 +18,13 @@
 #include <syslog.h>
 #include <sys/wait.h>
 #endif
+#include "qemu-common.h"
 #include "qapi/qmp/json-parser.h"
 #include "qapi/qmp/qdict.h"
 #include "qapi/qmp/qjson.h"
 #include "qapi/qmp/qstring.h"
 #include "guest-agent-core.h"
-#include "qemu/module.h"
-#include "qga-qapi-commands.h"
+#include "qga-qapi-init-commands.h"
 #include "qapi/qmp/qerror.h"
 #include "qapi/error.h"
 #include "channel.h"
@@ -234,7 +234,9 @@ QEMU_COPYRIGHT "\n"
 "  -p, --path        device/socket path (the default for virtio-serial is:\n"
 "                    %s,\n"
 "                    the default for isa-serial is:\n"
-"                    %s)\n"
+"                    %s).\n"
+"                    Socket addresses for vsock-listen are written as\n"
+"                    <cid>:<port>.\n"
 "  -l, --logfile     set logfile path, logs to stderr by default\n"
 "  -f, --pidfile     specify pidfile (default is %s)\n"
 #ifdef CONFIG_FSFREEZE
@@ -359,7 +361,7 @@ static gint ga_strcmp(gconstpointer str1, gconstpointer str2)
 }
 
 /* disable commands that aren't safe for fsfreeze */
-static void ga_disable_non_whitelisted(QmpCommand *cmd, void *opaque)
+static void ga_disable_non_whitelisted(const QmpCommand *cmd, void *opaque)
 {
     bool whitelisted = false;
     int i = 0;
@@ -378,7 +380,7 @@ static void ga_disable_non_whitelisted(QmpCommand *cmd, void *opaque)
 }
 
 /* [re-]enable all commands, except those explicitly blacklisted by user */
-static void ga_enable_non_blacklisted(QmpCommand *cmd, void *opaque)
+static void ga_enable_non_blacklisted(const QmpCommand *cmd, void *opaque)
 {
     GList *blacklist = opaque;
     const char *name = qmp_command_name(cmd);
@@ -523,15 +525,15 @@ fail:
 #endif
 }
 
-static int send_response(GAState *s, QDict *payload)
+static int send_response(GAState *s, const QDict *rsp)
 {
     const char *buf;
     QString *payload_qstr, *response_qstr;
     GIOStatus status;
 
-    g_assert(payload && s->channel);
+    g_assert(rsp && s->channel);
 
-    payload_qstr = qobject_to_json(QOBJECT(payload));
+    payload_qstr = qobject_to_json(QOBJECT(rsp));
     if (!payload_qstr) {
         return -EINVAL;
     }
@@ -557,53 +559,24 @@ static int send_response(GAState *s, QDict *payload)
     return 0;
 }
 
-static void process_command(GAState *s, QDict *req)
-{
-    QDict *rsp;
-    int ret;
-
-    g_assert(req);
-    g_debug("processing command");
-    rsp = qmp_dispatch(&ga_commands, QOBJECT(req), false);
-    if (rsp) {
-        ret = send_response(s, rsp);
-        if (ret < 0) {
-            g_warning("error sending response: %s", strerror(-ret));
-        }
-        qobject_unref(rsp);
-    }
-}
-
 /* handle requests/control events coming in over the channel */
 static void process_event(void *opaque, QObject *obj, Error *err)
 {
     GAState *s = opaque;
-    QDict *req, *rsp;
+    QDict *rsp;
     int ret;
 
     g_debug("process_event: called");
     assert(!obj != !err);
     if (err) {
-        goto err;
-    }
-    req = qobject_to(QDict, obj);
-    if (!req) {
-        error_setg(&err, "Input must be a JSON object");
-        goto err;
-    }
-    if (!qdict_haskey(req, "execute")) {
-        g_warning("unrecognized payload format");
-        error_setg(&err, QERR_UNSUPPORTED);
-        goto err;
+        rsp = qmp_error_response(err);
+        goto end;
     }
 
-    process_command(s, req);
-    qobject_unref(obj);
-    return;
+    g_debug("processing command");
+    rsp = qmp_dispatch(&ga_commands, obj, false);
 
-err:
-    g_warning("failed to parse event: %s", error_get_pretty(err));
-    rsp = qmp_error_response(err);
+end:
     ret = send_response(s, rsp);
     if (ret < 0) {
         g_warning("error sending error response: %s", strerror(-ret));
@@ -947,7 +920,7 @@ int64_t ga_get_fd_handle(GAState *s, Error **errp)
     return handle;
 }
 
-static void ga_print_cmd(QmpCommand *cmd, void *opaque)
+static void ga_print_cmd(const QmpCommand *cmd, void *opaque)
 {
     printf("%s\n", qmp_command_name(cmd));
 }

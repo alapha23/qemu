@@ -17,12 +17,14 @@
 
 #include "qemu/osdep.h"
 #include "qapi/error.h"
-#include "qemu-common.h"
+#include "qemu/module.h"
 #include "cpu.h"
 #include "hw/arm/xlnx-zynqmp.h"
 #include "hw/intc/arm_gic_common.h"
+#include "hw/boards.h"
 #include "exec/address-spaces.h"
 #include "sysemu/kvm.h"
+#include "sysemu/sysemu.h"
 #include "kvm_arm.h"
 
 #define GIC_NUM_SPI_INTR 160
@@ -171,20 +173,31 @@ static inline int arm_gic_ppi_index(int cpu_nr, int ppi_index)
     return GIC_NUM_SPI_INTR + cpu_nr * GIC_INTERNAL + ppi_index;
 }
 
-static void xlnx_zynqmp_create_rpu(XlnxZynqMPState *s, const char *boot_cpu,
-                                   Error **errp)
+static void xlnx_zynqmp_create_rpu(MachineState *ms, XlnxZynqMPState *s,
+                                   const char *boot_cpu, Error **errp)
 {
     Error *err = NULL;
     int i;
-    int num_rpus = MIN(smp_cpus - XLNX_ZYNQMP_NUM_APU_CPUS, XLNX_ZYNQMP_NUM_RPU_CPUS);
+    int num_rpus = MIN(ms->smp.cpus - XLNX_ZYNQMP_NUM_APU_CPUS,
+                       XLNX_ZYNQMP_NUM_RPU_CPUS);
+
+    if (num_rpus <= 0) {
+        /* Don't create rpu-cluster object if there's nothing to put in it */
+        return;
+    }
+
+    object_initialize_child(OBJECT(s), "rpu-cluster", &s->rpu_cluster,
+                            sizeof(s->rpu_cluster), TYPE_CPU_CLUSTER,
+                            &error_abort, NULL);
+    qdev_prop_set_uint32(DEVICE(&s->rpu_cluster), "cluster-id", 1);
 
     for (i = 0; i < num_rpus; i++) {
         char *name;
 
-        object_initialize(&s->rpu_cpu[i], sizeof(s->rpu_cpu[i]),
-                          "cortex-r5f-" TYPE_ARM_CPU);
-        object_property_add_child(OBJECT(s), "rpu-cpu[*]",
-                                  OBJECT(&s->rpu_cpu[i]), &error_abort);
+        object_initialize_child(OBJECT(&s->rpu_cluster), "rpu-cpu[*]",
+                                &s->rpu_cpu[i], sizeof(s->rpu_cpu[i]),
+                                ARM_CPU_TYPE_NAME("cortex-r5f"),
+                                &error_abort, NULL);
 
         name = object_get_canonical_path_component(OBJECT(&s->rpu_cpu[i]));
         if (strcmp(name, boot_cpu)) {
@@ -205,18 +218,27 @@ static void xlnx_zynqmp_create_rpu(XlnxZynqMPState *s, const char *boot_cpu,
             return;
         }
     }
+
+    qdev_init_nofail(DEVICE(&s->rpu_cluster));
 }
 
 static void xlnx_zynqmp_init(Object *obj)
 {
+    MachineState *ms = MACHINE(qdev_get_machine());
     XlnxZynqMPState *s = XLNX_ZYNQMP(obj);
     int i;
-    int num_apus = MIN(smp_cpus, XLNX_ZYNQMP_NUM_APU_CPUS);
+    int num_apus = MIN(ms->smp.cpus, XLNX_ZYNQMP_NUM_APU_CPUS);
+
+    object_initialize_child(obj, "apu-cluster", &s->apu_cluster,
+                            sizeof(s->apu_cluster), TYPE_CPU_CLUSTER,
+                            &error_abort, NULL);
+    qdev_prop_set_uint32(DEVICE(&s->apu_cluster), "cluster-id", 0);
 
     for (i = 0; i < num_apus; i++) {
-        object_initialize_child(obj, "apu-cpu[*]", &s->apu_cpu[i],
-                                sizeof(s->apu_cpu[i]),
-                                "cortex-a53-" TYPE_ARM_CPU, &error_abort, NULL);
+        object_initialize_child(OBJECT(&s->apu_cluster), "apu-cpu[*]",
+                                &s->apu_cpu[i], sizeof(s->apu_cpu[i]),
+                                ARM_CPU_TYPE_NAME("cortex-a53"),
+                                &error_abort, NULL);
     }
 
     sysbus_init_child_obj(obj, "gic", &s->gic, sizeof(s->gic),
@@ -272,11 +294,12 @@ static void xlnx_zynqmp_init(Object *obj)
 
 static void xlnx_zynqmp_realize(DeviceState *dev, Error **errp)
 {
+    MachineState *ms = MACHINE(qdev_get_machine());
     XlnxZynqMPState *s = XLNX_ZYNQMP(dev);
     MemoryRegion *system_memory = get_system_memory();
     uint8_t i;
     uint64_t ram_size;
-    int num_apus = MIN(smp_cpus, XLNX_ZYNQMP_NUM_APU_CPUS);
+    int num_apus = MIN(ms->smp.cpus, XLNX_ZYNQMP_NUM_APU_CPUS);
     const char *boot_cpu = s->boot_cpu ? s->boot_cpu : "apu-cpu[0]";
     ram_addr_t ddr_low_size, ddr_high_size;
     qemu_irq gic_spi[GIC_NUM_SPI_INTR];
@@ -295,9 +318,9 @@ static void xlnx_zynqmp_realize(DeviceState *dev, Error **errp)
         ddr_low_size = XLNX_ZYNQMP_MAX_LOW_RAM_SIZE;
         ddr_high_size = ram_size - XLNX_ZYNQMP_MAX_LOW_RAM_SIZE;
 
-        memory_region_init_alias(&s->ddr_ram_high, NULL,
-                                 "ddr-ram-high", s->ddr_ram,
-                                  ddr_low_size, ddr_high_size);
+        memory_region_init_alias(&s->ddr_ram_high, OBJECT(dev),
+                                 "ddr-ram-high", s->ddr_ram, ddr_low_size,
+                                 ddr_high_size);
         memory_region_add_subregion(get_system_memory(),
                                     XLNX_ZYNQMP_HIGH_RAM_START,
                                     &s->ddr_ram_high);
@@ -307,9 +330,8 @@ static void xlnx_zynqmp_realize(DeviceState *dev, Error **errp)
         ddr_low_size = ram_size;
     }
 
-    memory_region_init_alias(&s->ddr_ram_low, NULL,
-                             "ddr-ram-low", s->ddr_ram,
-                              0, ddr_low_size);
+    memory_region_init_alias(&s->ddr_ram_low, OBJECT(dev), "ddr-ram-low",
+                             s->ddr_ram, 0, ddr_low_size);
     memory_region_add_subregion(get_system_memory(), 0, &s->ddr_ram_low);
 
     /* Create the four OCM banks */
@@ -332,6 +354,8 @@ static void xlnx_zynqmp_realize(DeviceState *dev, Error **errp)
     qdev_prop_set_bit(DEVICE(&s->gic), "has-security-extensions", s->secure);
     qdev_prop_set_bit(DEVICE(&s->gic),
                       "has-virtualization-extensions", s->virt);
+
+    qdev_init_nofail(DEVICE(&s->apu_cluster));
 
     /* Realize APUs before realizing the GIC. KVM requires this.  */
     for (i = 0; i < num_apus; i++) {
@@ -436,7 +460,7 @@ static void xlnx_zynqmp_realize(DeviceState *dev, Error **errp)
                     "RPUs just use -smp 6.");
     }
 
-    xlnx_zynqmp_create_rpu(s, boot_cpu, &err);
+    xlnx_zynqmp_create_rpu(ms, s, boot_cpu, &err);
     if (err) {
         error_propagate(errp, err);
         return;
@@ -496,7 +520,7 @@ static void xlnx_zynqmp_realize(DeviceState *dev, Error **errp)
     sysbus_connect_irq(SYS_BUS_DEVICE(&s->sata), 0, gic_spi[SATA_INTR]);
 
     for (i = 0; i < XLNX_ZYNQMP_NUM_SDHCI; i++) {
-        char *bus_name = g_strdup_printf("sd-bus%d", i);
+        char *bus_name;
         SysBusDevice *sbd = SYS_BUS_DEVICE(&s->sdhci[i]);
         Object *sdhci = OBJECT(&s->sdhci[i]);
 
@@ -506,8 +530,20 @@ static void xlnx_zynqmp_realize(DeviceState *dev, Error **errp)
          * - eMMC Specification Version 4.51
          */
         object_property_set_uint(sdhci, 3, "sd-spec-version", &err);
+        if (err) {
+            error_propagate(errp, err);
+            return;
+        }
         object_property_set_uint(sdhci, SDHCI_CAPABILITIES, "capareg", &err);
+        if (err) {
+            error_propagate(errp, err);
+            return;
+        }
         object_property_set_uint(sdhci, UHS_I, "uhs", &err);
+        if (err) {
+            error_propagate(errp, err);
+            return;
+        }
         object_property_set_bool(sdhci, true, "realized", &err);
         if (err) {
             error_propagate(errp, err);
@@ -517,8 +553,8 @@ static void xlnx_zynqmp_realize(DeviceState *dev, Error **errp)
         sysbus_connect_irq(sbd, 0, gic_spi[sdhci_intr[i]]);
 
         /* Alias controller SD bus to the SoC itself */
-        object_property_add_alias(OBJECT(s), bus_name, sdhci, "sd-bus",
-                                  &error_abort);
+        bus_name = g_strdup_printf("sd-bus%d", i);
+        object_property_add_alias(OBJECT(s), bus_name, sdhci, "sd-bus");
         g_free(bus_name);
     }
 
@@ -526,6 +562,10 @@ static void xlnx_zynqmp_realize(DeviceState *dev, Error **errp)
         gchar *bus_name;
 
         object_property_set_bool(OBJECT(&s->spi[i]), true, "realized", &err);
+        if (err) {
+            error_propagate(errp, err);
+            return;
+        }
 
         sysbus_mmio_map(SYS_BUS_DEVICE(&s->spi[i]), 0, spi_addr[i]);
         sysbus_connect_irq(SYS_BUS_DEVICE(&s->spi[i]), 0,
@@ -534,12 +574,15 @@ static void xlnx_zynqmp_realize(DeviceState *dev, Error **errp)
         /* Alias controller SPI bus to the SoC itself */
         bus_name = g_strdup_printf("spi%d", i);
         object_property_add_alias(OBJECT(s), bus_name,
-                                  OBJECT(&s->spi[i]), "spi0",
-                                  &error_abort);
+                                  OBJECT(&s->spi[i]), "spi0");
         g_free(bus_name);
     }
 
     object_property_set_bool(OBJECT(&s->qspi), true, "realized", &err);
+    if (err) {
+        error_propagate(errp, err);
+        return;
+    }
     sysbus_mmio_map(SYS_BUS_DEVICE(&s->qspi), 0, QSPI_ADDR);
     sysbus_mmio_map(SYS_BUS_DEVICE(&s->qspi), 1, LQSPI_ADDR);
     sysbus_connect_irq(SYS_BUS_DEVICE(&s->qspi), 0, gic_spi[QSPI_IRQ]);
@@ -552,8 +595,7 @@ static void xlnx_zynqmp_realize(DeviceState *dev, Error **errp)
         bus_name = g_strdup_printf("qspi%d", i);
         target_bus = g_strdup_printf("spi%d", i);
         object_property_add_alias(OBJECT(s), bus_name,
-                                  OBJECT(&s->qspi), target_bus,
-                                  &error_abort);
+                                  OBJECT(&s->qspi), target_bus);
         g_free(bus_name);
         g_free(target_bus);
     }
@@ -594,6 +636,10 @@ static void xlnx_zynqmp_realize(DeviceState *dev, Error **errp)
 
     for (i = 0; i < XLNX_ZYNQMP_NUM_GDMA_CH; i++) {
         object_property_set_uint(OBJECT(&s->gdma[i]), 128, "bus-width", &err);
+        if (err) {
+            error_propagate(errp, err);
+            return;
+        }
         object_property_set_bool(OBJECT(&s->gdma[i]), true, "realized", &err);
         if (err) {
             error_propagate(errp, err);
@@ -632,7 +678,7 @@ static void xlnx_zynqmp_class_init(ObjectClass *oc, void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(oc);
 
-    dc->props = xlnx_zynqmp_props;
+    device_class_set_props(dc, xlnx_zynqmp_props);
     dc->realize = xlnx_zynqmp_realize;
     /* Reason: Uses serial_hds in realize function, thus can't be used twice */
     dc->user_creatable = false;

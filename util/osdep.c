@@ -29,7 +29,7 @@
 #include <sys/statvfs.h>
 /* See MySQL bug #7156 (http://bugs.mysql.com/bug.php?id=7156) for
    discussion about Solaris header problems */
-extern int madvise(caddr_t, size_t, int);
+extern int madvise(char *, size_t, int);
 #endif
 
 #include "qemu-common.h"
@@ -82,8 +82,8 @@ static int qemu_mprotect__osdep(void *addr, size_t size, int prot)
     DWORD old_protect;
 
     if (!VirtualProtect(addr, size, prot, &old_protect)) {
-        error_report("%s: VirtualProtect failed with error code %ld",
-                     __func__, GetLastError());
+        g_autofree gchar *emsg = g_win32_error_message(GetLastError());
+        error_report("%s: VirtualProtect failed: %s", __func__, emsg);
         return -1;
     }
     return 0;
@@ -371,6 +371,21 @@ int qemu_close(int fd)
 }
 
 /*
+ * Delete a file from the filesystem, unless the filename is /dev/fdset/...
+ *
+ * Returns: On success, zero is returned.  On error, -1 is returned,
+ * and errno is set appropriately.
+ */
+int qemu_unlink(const char *name)
+{
+    if (g_str_has_prefix(name, "/dev/fdset/")) {
+        return 0;
+    }
+
+    return unlink(name);
+}
+
+/*
  * A variant of write(2) which handles partial write.
  *
  * Return the number of bytes transferred.
@@ -470,8 +485,8 @@ void fips_set_state(bool requested)
 
 #ifdef _FIPS_DEBUG
     fprintf(stderr, "FIPS mode %s (requested %s)\n",
-	    (fips_enabled ? "enabled" : "disabled"),
-	    (requested ? "enabled" : "disabled"));
+            (fips_enabled ? "enabled" : "disabled"),
+            (requested ? "enabled" : "disabled"));
 #endif
 }
 

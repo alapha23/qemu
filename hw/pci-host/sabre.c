@@ -28,13 +28,16 @@
 #include "hw/sysbus.h"
 #include "hw/pci/pci.h"
 #include "hw/pci/pci_host.h"
+#include "hw/qdev-properties.h"
 #include "hw/pci/pci_bridge.h"
 #include "hw/pci/pci_bus.h"
+#include "hw/irq.h"
 #include "hw/pci-bridge/simba.h"
 #include "hw/pci-host/sabre.h"
-#include "sysemu/sysemu.h"
 #include "exec/address-spaces.h"
 #include "qemu/log.h"
+#include "qemu/module.h"
+#include "sysemu/runstate.h"
 #include "trace.h"
 
 /*
@@ -439,7 +442,7 @@ static void sabre_init(Object *obj)
     object_property_add_link(obj, "iommu", TYPE_SUN4U_IOMMU,
                              (Object **) &s->iommu,
                              qdev_prop_allow_set_link_before_realize,
-                             0, NULL);
+                             0);
 
     /* sabre_config */
     memory_region_init_io(&s->sabre_config, OBJECT(s), &sabre_config_ops, s,
@@ -518,7 +521,7 @@ static void sabre_class_init(ObjectClass *klass, void *data)
 
     dc->realize = sabre_realize;
     dc->reset = sabre_reset;
-    dc->props = sabre_properties;
+    device_class_set_props(dc, sabre_properties);
     set_bit(DEVICE_CATEGORY_BRIDGE, dc->categories);
     dc->fw_name = "pci";
     sbc->explicit_ofw_unit_address = sabre_ofw_unit_address;

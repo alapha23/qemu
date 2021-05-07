@@ -29,7 +29,6 @@
 #ifndef QEMU_MIGRATION_RAM_H
 #define QEMU_MIGRATION_RAM_H
 
-#include "qemu-common.h"
 #include "qapi/qapi-types-migration.h"
 #include "exec/cpu-common.h"
 #include "io/channel.h"
@@ -41,13 +40,6 @@ extern CompressionStats compression_counters;
 int xbzrle_cache_resize(int64_t new_size, Error **errp);
 uint64_t ram_bytes_remaining(void);
 uint64_t ram_bytes_total(void);
-
-int multifd_save_setup(void);
-int multifd_save_cleanup(Error **errp);
-int multifd_load_setup(void);
-int multifd_load_cleanup(Error **errp);
-bool multifd_recv_all_channels_created(void);
-bool multifd_recv_new_channel(QIOChannel *ioc);
 
 uint64_t ram_pagesize_summary(void);
 int ram_save_queue_pages(const char *rbname, ram_addr_t start, ram_addr_t len);
@@ -74,5 +66,6 @@ int ram_dirty_bitmap_reload(MigrationState *s, RAMBlock *rb);
 /* ram cache */
 int colo_init_ram_cache(void);
 void colo_release_ram_cache(void);
+void colo_incoming_start_dirty_log(void);
 
 #endif

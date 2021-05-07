@@ -19,11 +19,13 @@
  */
 
 #include "qemu/osdep.h"
-#include "hw/hw.h"
 #include "hw/i2c/i2c.h"
+#include "hw/irq.h"
+#include "migration/vmstate.h"
 #include "tmp105.h"
 #include "qapi/error.h"
 #include "qapi/visitor.h"
+#include "qemu/module.h"
 
 static void tmp105_interrupt_update(TMP105State *s)
 {
@@ -79,7 +81,7 @@ static void tmp105_set_temperature(Object *obj, Visitor *v, const char *name,
         return;
     }
     if (temp >= 128000 || temp < -128000) {
-        error_setg(errp, "value %" PRId64 ".%03" PRIu64 " °C is out of range",
+        error_setg(errp, "value %" PRId64 ".%03" PRIu64 " C is out of range",
                    temp / 1000, temp % 1000);
         return;
     }
@@ -147,7 +149,7 @@ static void tmp105_write(TMP105State *s)
     }
 }
 
-static int tmp105_rx(I2CSlave *i2c)
+static uint8_t tmp105_rx(I2CSlave *i2c)
 {
     TMP105State *s = TMP105(i2c);
 
@@ -243,7 +245,7 @@ static void tmp105_initfn(Object *obj)
 {
     object_property_add(obj, "temperature", "int",
                         tmp105_get_temperature,
-                        tmp105_set_temperature, NULL, NULL, NULL);
+                        tmp105_set_temperature, NULL, NULL);
 }
 
 static void tmp105_class_init(ObjectClass *klass, void *data)

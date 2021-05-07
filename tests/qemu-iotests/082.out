@@ -3,41 +3,43 @@ QA output created by 082
 === create: Options specified more than once ===
 
 Testing: create -f foo -f qcow2 TEST_DIR/t.qcow2 128M
-Formatting 'TEST_DIR/t.qcow2', fmt=qcow2 size=134217728 cluster_size=65536 lazy_refcounts=off refcount_bits=16
+Formatting 'TEST_DIR/t.qcow2', fmt=qcow2 size=134217728 cluster_size=65536 lazy_refcounts=off refcount_bits=16 compression_type=zlib
 image: TEST_DIR/t.IMGFMT
 file format: IMGFMT
-virtual size: 128M (134217728 bytes)
+virtual size: 128 MiB (134217728 bytes)
 cluster_size: 65536
 
 Testing: create -f qcow2 -o cluster_size=4k -o lazy_refcounts=on TEST_DIR/t.qcow2 128M
-Formatting 'TEST_DIR/t.qcow2', fmt=qcow2 size=134217728 cluster_size=4096 lazy_refcounts=on refcount_bits=16
+Formatting 'TEST_DIR/t.qcow2', fmt=qcow2 size=134217728 cluster_size=4096 lazy_refcounts=on refcount_bits=16 compression_type=zlib
 image: TEST_DIR/t.IMGFMT
 file format: IMGFMT
-virtual size: 128M (134217728 bytes)
+virtual size: 128 MiB (134217728 bytes)
 cluster_size: 4096
 Format specific information:
     compat: 1.1
+    compression type: zlib
     lazy refcounts: true
     refcount bits: 16
     corrupt: false
 
 Testing: create -f qcow2 -o cluster_size=4k -o lazy_refcounts=on -o cluster_size=8k TEST_DIR/t.qcow2 128M
-Formatting 'TEST_DIR/t.qcow2', fmt=qcow2 size=134217728 cluster_size=8192 lazy_refcounts=on refcount_bits=16
+Formatting 'TEST_DIR/t.qcow2', fmt=qcow2 size=134217728 cluster_size=8192 lazy_refcounts=on refcount_bits=16 compression_type=zlib
 image: TEST_DIR/t.IMGFMT
 file format: IMGFMT
-virtual size: 128M (134217728 bytes)
+virtual size: 128 MiB (134217728 bytes)
 cluster_size: 8192
 Format specific information:
     compat: 1.1
+    compression type: zlib
     lazy refcounts: true
     refcount bits: 16
     corrupt: false
 
 Testing: create -f qcow2 -o cluster_size=4k,cluster_size=8k TEST_DIR/t.qcow2 128M
-Formatting 'TEST_DIR/t.qcow2', fmt=qcow2 size=134217728 cluster_size=8192 lazy_refcounts=off refcount_bits=16
+Formatting 'TEST_DIR/t.qcow2', fmt=qcow2 size=134217728 cluster_size=8192 lazy_refcounts=off refcount_bits=16 compression_type=zlib
 image: TEST_DIR/t.IMGFMT
 file format: IMGFMT
-virtual size: 128M (134217728 bytes)
+virtual size: 128 MiB (134217728 bytes)
 cluster_size: 8192
 
 === create: help for -o ===
@@ -47,7 +49,10 @@ Supported options:
   backing_file=<str>     - File name of a base image
   backing_fmt=<str>      - Image format of the base image
   cluster_size=<size>    - qcow2 cluster size
-  compat=<str>           - Compatibility level (0.10 or 1.1)
+  compat=<str>           - Compatibility level (v2 [0.10] or v3 [1.1])
+  compression_type=<str> - Compression method used for image cluster compression
+  data_file=<str>        - File name of an external data file
+  data_file_raw=<bool (on/off)> - The external data file must stay valid as a raw image
   encrypt.cipher-alg=<str> - Name of encryption cipher algorithm
   encrypt.cipher-mode=<str> - Name of encryption cipher mode
   encrypt.format=<str>   - Encrypt the image, format choices: 'aes', 'luks'
@@ -68,7 +73,10 @@ Supported options:
   backing_file=<str>     - File name of a base image
   backing_fmt=<str>      - Image format of the base image
   cluster_size=<size>    - qcow2 cluster size
-  compat=<str>           - Compatibility level (0.10 or 1.1)
+  compat=<str>           - Compatibility level (v2 [0.10] or v3 [1.1])
+  compression_type=<str> - Compression method used for image cluster compression
+  data_file=<str>        - File name of an external data file
+  data_file_raw=<bool (on/off)> - The external data file must stay valid as a raw image
   encrypt.cipher-alg=<str> - Name of encryption cipher algorithm
   encrypt.cipher-mode=<str> - Name of encryption cipher mode
   encrypt.format=<str>   - Encrypt the image, format choices: 'aes', 'luks'
@@ -89,7 +97,10 @@ Supported options:
   backing_file=<str>     - File name of a base image
   backing_fmt=<str>      - Image format of the base image
   cluster_size=<size>    - qcow2 cluster size
-  compat=<str>           - Compatibility level (0.10 or 1.1)
+  compat=<str>           - Compatibility level (v2 [0.10] or v3 [1.1])
+  compression_type=<str> - Compression method used for image cluster compression
+  data_file=<str>        - File name of an external data file
+  data_file_raw=<bool (on/off)> - The external data file must stay valid as a raw image
   encrypt.cipher-alg=<str> - Name of encryption cipher algorithm
   encrypt.cipher-mode=<str> - Name of encryption cipher mode
   encrypt.format=<str>   - Encrypt the image, format choices: 'aes', 'luks'
@@ -110,7 +121,10 @@ Supported options:
   backing_file=<str>     - File name of a base image
   backing_fmt=<str>      - Image format of the base image
   cluster_size=<size>    - qcow2 cluster size
-  compat=<str>           - Compatibility level (0.10 or 1.1)
+  compat=<str>           - Compatibility level (v2 [0.10] or v3 [1.1])
+  compression_type=<str> - Compression method used for image cluster compression
+  data_file=<str>        - File name of an external data file
+  data_file_raw=<bool (on/off)> - The external data file must stay valid as a raw image
   encrypt.cipher-alg=<str> - Name of encryption cipher algorithm
   encrypt.cipher-mode=<str> - Name of encryption cipher mode
   encrypt.format=<str>   - Encrypt the image, format choices: 'aes', 'luks'
@@ -131,7 +145,10 @@ Supported options:
   backing_file=<str>     - File name of a base image
   backing_fmt=<str>      - Image format of the base image
   cluster_size=<size>    - qcow2 cluster size
-  compat=<str>           - Compatibility level (0.10 or 1.1)
+  compat=<str>           - Compatibility level (v2 [0.10] or v3 [1.1])
+  compression_type=<str> - Compression method used for image cluster compression
+  data_file=<str>        - File name of an external data file
+  data_file_raw=<bool (on/off)> - The external data file must stay valid as a raw image
   encrypt.cipher-alg=<str> - Name of encryption cipher algorithm
   encrypt.cipher-mode=<str> - Name of encryption cipher mode
   encrypt.format=<str>   - Encrypt the image, format choices: 'aes', 'luks'
@@ -152,7 +169,10 @@ Supported options:
   backing_file=<str>     - File name of a base image
   backing_fmt=<str>      - Image format of the base image
   cluster_size=<size>    - qcow2 cluster size
-  compat=<str>           - Compatibility level (0.10 or 1.1)
+  compat=<str>           - Compatibility level (v2 [0.10] or v3 [1.1])
+  compression_type=<str> - Compression method used for image cluster compression
+  data_file=<str>        - File name of an external data file
+  data_file_raw=<bool (on/off)> - The external data file must stay valid as a raw image
   encrypt.cipher-alg=<str> - Name of encryption cipher algorithm
   encrypt.cipher-mode=<str> - Name of encryption cipher mode
   encrypt.format=<str>   - Encrypt the image, format choices: 'aes', 'luks'
@@ -173,7 +193,10 @@ Supported options:
   backing_file=<str>     - File name of a base image
   backing_fmt=<str>      - Image format of the base image
   cluster_size=<size>    - qcow2 cluster size
-  compat=<str>           - Compatibility level (0.10 or 1.1)
+  compat=<str>           - Compatibility level (v2 [0.10] or v3 [1.1])
+  compression_type=<str> - Compression method used for image cluster compression
+  data_file=<str>        - File name of an external data file
+  data_file_raw=<bool (on/off)> - The external data file must stay valid as a raw image
   encrypt.cipher-alg=<str> - Name of encryption cipher algorithm
   encrypt.cipher-mode=<str> - Name of encryption cipher mode
   encrypt.format=<str>   - Encrypt the image, format choices: 'aes', 'luks'
@@ -194,7 +217,10 @@ Supported options:
   backing_file=<str>     - File name of a base image
   backing_fmt=<str>      - Image format of the base image
   cluster_size=<size>    - qcow2 cluster size
-  compat=<str>           - Compatibility level (0.10 or 1.1)
+  compat=<str>           - Compatibility level (v2 [0.10] or v3 [1.1])
+  compression_type=<str> - Compression method used for image cluster compression
+  data_file=<str>        - File name of an external data file
+  data_file_raw=<bool (on/off)> - The external data file must stay valid as a raw image
   encrypt.cipher-alg=<str> - Name of encryption cipher algorithm
   encrypt.cipher-mode=<str> - Name of encryption cipher mode
   encrypt.format=<str>   - Encrypt the image, format choices: 'aes', 'luks'
@@ -211,10 +237,10 @@ Supported options:
   size=<size>            - Virtual disk size
 
 Testing: create -f qcow2 -u -o backing_file=TEST_DIR/t.qcow2,,help TEST_DIR/t.qcow2 128M
-Formatting 'TEST_DIR/t.qcow2', fmt=qcow2 size=134217728 backing_file=TEST_DIR/t.qcow2,,help cluster_size=65536 lazy_refcounts=off refcount_bits=16
+Formatting 'TEST_DIR/t.qcow2', fmt=qcow2 size=134217728 backing_file=TEST_DIR/t.qcow2,,help cluster_size=65536 lazy_refcounts=off refcount_bits=16 compression_type=zlib
 
 Testing: create -f qcow2 -u -o backing_file=TEST_DIR/t.qcow2,,? TEST_DIR/t.qcow2 128M
-Formatting 'TEST_DIR/t.qcow2', fmt=qcow2 size=134217728 backing_file=TEST_DIR/t.qcow2,,? cluster_size=65536 lazy_refcounts=off refcount_bits=16
+Formatting 'TEST_DIR/t.qcow2', fmt=qcow2 size=134217728 backing_file=TEST_DIR/t.qcow2,,? cluster_size=65536 lazy_refcounts=off refcount_bits=16 compression_type=zlib
 
 Testing: create -f qcow2 -o backing_file=TEST_DIR/t.qcow2, -o help TEST_DIR/t.qcow2 128M
 qemu-img: Invalid option list: backing_file=TEST_DIR/t.qcow2,
@@ -226,11 +252,14 @@ Testing: create -f qcow2 -o backing_file=TEST_DIR/t.qcow2 -o ,, -o help TEST_DIR
 qemu-img: Invalid option list: ,,
 
 Testing: create -f qcow2 -o help
-Supported options:
+Supported qcow2 options:
   backing_file=<str>     - File name of a base image
   backing_fmt=<str>      - Image format of the base image
   cluster_size=<size>    - qcow2 cluster size
-  compat=<str>           - Compatibility level (0.10 or 1.1)
+  compat=<str>           - Compatibility level (v2 [0.10] or v3 [1.1])
+  compression_type=<str> - Compression method used for image cluster compression
+  data_file=<str>        - File name of an external data file
+  data_file_raw=<bool (on/off)> - The external data file must stay valid as a raw image
   encrypt.cipher-alg=<str> - Name of encryption cipher algorithm
   encrypt.cipher-mode=<str> - Name of encryption cipher mode
   encrypt.format=<str>   - Encrypt the image, format choices: 'aes', 'luks'
@@ -245,9 +274,15 @@ Supported options:
   refcount_bits=<num>    - Width of a reference count entry in bits
   size=<size>            - Virtual disk size
 
+The protocol level may support further options.
+Specify the target filename to include those options.
+
 Testing: create -o help
-Supported options:
+Supported raw options:
   size=<size>            - Virtual disk size
+
+The protocol level may support further options.
+Specify the target filename to include those options.
 
 Testing: create -f bochs -o help
 qemu-img: Format driver 'bochs' does not support image creation
@@ -255,26 +290,27 @@ qemu-img: Format driver 'bochs' does not support image creation
 === convert: Options specified more than once ===
 
 Testing: create -f qcow2 TEST_DIR/t.qcow2 128M
-Formatting 'TEST_DIR/t.qcow2', fmt=qcow2 size=134217728 cluster_size=65536 lazy_refcounts=off refcount_bits=16
+Formatting 'TEST_DIR/t.qcow2', fmt=qcow2 size=134217728 cluster_size=65536 lazy_refcounts=off refcount_bits=16 compression_type=zlib
 
 Testing: convert -f foo -f qcow2 TEST_DIR/t.qcow2 TEST_DIR/t.qcow2.base
 image: TEST_DIR/t.IMGFMT.base
 file format: raw
-virtual size: 128M (134217728 bytes)
+virtual size: 128 MiB (134217728 bytes)
 
 Testing: convert -O foo -O qcow2 TEST_DIR/t.qcow2 TEST_DIR/t.qcow2.base
 image: TEST_DIR/t.IMGFMT.base
 file format: IMGFMT
-virtual size: 128M (134217728 bytes)
+virtual size: 128 MiB (134217728 bytes)
 cluster_size: 65536
 
 Testing: convert -O qcow2 -o cluster_size=4k -o lazy_refcounts=on TEST_DIR/t.qcow2 TEST_DIR/t.qcow2.base
 image: TEST_DIR/t.IMGFMT.base
 file format: IMGFMT
-virtual size: 128M (134217728 bytes)
+virtual size: 128 MiB (134217728 bytes)
 cluster_size: 4096
 Format specific information:
     compat: 1.1
+    compression type: zlib
     lazy refcounts: true
     refcount bits: 16
     corrupt: false
@@ -282,10 +318,11 @@ Format specific information:
 Testing: convert -O qcow2 -o cluster_size=4k -o lazy_refcounts=on -o cluster_size=8k TEST_DIR/t.qcow2 TEST_DIR/t.qcow2.base
 image: TEST_DIR/t.IMGFMT.base
 file format: IMGFMT
-virtual size: 128M (134217728 bytes)
+virtual size: 128 MiB (134217728 bytes)
 cluster_size: 8192
 Format specific information:
     compat: 1.1
+    compression type: zlib
     lazy refcounts: true
     refcount bits: 16
     corrupt: false
@@ -293,7 +330,7 @@ Format specific information:
 Testing: convert -O qcow2 -o cluster_size=4k,cluster_size=8k TEST_DIR/t.qcow2 TEST_DIR/t.qcow2.base
 image: TEST_DIR/t.IMGFMT.base
 file format: IMGFMT
-virtual size: 128M (134217728 bytes)
+virtual size: 128 MiB (134217728 bytes)
 cluster_size: 8192
 
 === convert: help for -o ===
@@ -303,7 +340,10 @@ Supported options:
   backing_file=<str>     - File name of a base image
   backing_fmt=<str>      - Image format of the base image
   cluster_size=<size>    - qcow2 cluster size
-  compat=<str>           - Compatibility level (0.10 or 1.1)
+  compat=<str>           - Compatibility level (v2 [0.10] or v3 [1.1])
+  compression_type=<str> - Compression method used for image cluster compression
+  data_file=<str>        - File name of an external data file
+  data_file_raw=<bool (on/off)> - The external data file must stay valid as a raw image
   encrypt.cipher-alg=<str> - Name of encryption cipher algorithm
   encrypt.cipher-mode=<str> - Name of encryption cipher mode
   encrypt.format=<str>   - Encrypt the image, format choices: 'aes', 'luks'
@@ -324,7 +364,10 @@ Supported options:
   backing_file=<str>     - File name of a base image
   backing_fmt=<str>      - Image format of the base image
   cluster_size=<size>    - qcow2 cluster size
-  compat=<str>           - Compatibility level (0.10 or 1.1)
+  compat=<str>           - Compatibility level (v2 [0.10] or v3 [1.1])
+  compression_type=<str> - Compression method used for image cluster compression
+  data_file=<str>        - File name of an external data file
+  data_file_raw=<bool (on/off)> - The external data file must stay valid as a raw image
   encrypt.cipher-alg=<str> - Name of encryption cipher algorithm
   encrypt.cipher-mode=<str> - Name of encryption cipher mode
   encrypt.format=<str>   - Encrypt the image, format choices: 'aes', 'luks'
@@ -345,7 +388,10 @@ Supported options:
   backing_file=<str>     - File name of a base image
   backing_fmt=<str>      - Image format of the base image
   cluster_size=<size>    - qcow2 cluster size
-  compat=<str>           - Compatibility level (0.10 or 1.1)
+  compat=<str>           - Compatibility level (v2 [0.10] or v3 [1.1])
+  compression_type=<str> - Compression method used for image cluster compression
+  data_file=<str>        - File name of an external data file
+  data_file_raw=<bool (on/off)> - The external data file must stay valid as a raw image
   encrypt.cipher-alg=<str> - Name of encryption cipher algorithm
   encrypt.cipher-mode=<str> - Name of encryption cipher mode
   encrypt.format=<str>   - Encrypt the image, format choices: 'aes', 'luks'
@@ -366,7 +412,10 @@ Supported options:
   backing_file=<str>     - File name of a base image
   backing_fmt=<str>      - Image format of the base image
   cluster_size=<size>    - qcow2 cluster size
-  compat=<str>           - Compatibility level (0.10 or 1.1)
+  compat=<str>           - Compatibility level (v2 [0.10] or v3 [1.1])
+  compression_type=<str> - Compression method used for image cluster compression
+  data_file=<str>        - File name of an external data file
+  data_file_raw=<bool (on/off)> - The external data file must stay valid as a raw image
   encrypt.cipher-alg=<str> - Name of encryption cipher algorithm
   encrypt.cipher-mode=<str> - Name of encryption cipher mode
   encrypt.format=<str>   - Encrypt the image, format choices: 'aes', 'luks'
@@ -387,7 +436,10 @@ Supported options:
   backing_file=<str>     - File name of a base image
   backing_fmt=<str>      - Image format of the base image
   cluster_size=<size>    - qcow2 cluster size
-  compat=<str>           - Compatibility level (0.10 or 1.1)
+  compat=<str>           - Compatibility level (v2 [0.10] or v3 [1.1])
+  compression_type=<str> - Compression method used for image cluster compression
+  data_file=<str>        - File name of an external data file
+  data_file_raw=<bool (on/off)> - The external data file must stay valid as a raw image
   encrypt.cipher-alg=<str> - Name of encryption cipher algorithm
   encrypt.cipher-mode=<str> - Name of encryption cipher mode
   encrypt.format=<str>   - Encrypt the image, format choices: 'aes', 'luks'
@@ -408,7 +460,10 @@ Supported options:
   backing_file=<str>     - File name of a base image
   backing_fmt=<str>      - Image format of the base image
   cluster_size=<size>    - qcow2 cluster size
-  compat=<str>           - Compatibility level (0.10 or 1.1)
+  compat=<str>           - Compatibility level (v2 [0.10] or v3 [1.1])
+  compression_type=<str> - Compression method used for image cluster compression
+  data_file=<str>        - File name of an external data file
+  data_file_raw=<bool (on/off)> - The external data file must stay valid as a raw image
   encrypt.cipher-alg=<str> - Name of encryption cipher algorithm
   encrypt.cipher-mode=<str> - Name of encryption cipher mode
   encrypt.format=<str>   - Encrypt the image, format choices: 'aes', 'luks'
@@ -429,7 +484,10 @@ Supported options:
   backing_file=<str>     - File name of a base image
   backing_fmt=<str>      - Image format of the base image
   cluster_size=<size>    - qcow2 cluster size
-  compat=<str>           - Compatibility level (0.10 or 1.1)
+  compat=<str>           - Compatibility level (v2 [0.10] or v3 [1.1])
+  compression_type=<str> - Compression method used for image cluster compression
+  data_file=<str>        - File name of an external data file
+  data_file_raw=<bool (on/off)> - The external data file must stay valid as a raw image
   encrypt.cipher-alg=<str> - Name of encryption cipher algorithm
   encrypt.cipher-mode=<str> - Name of encryption cipher mode
   encrypt.format=<str>   - Encrypt the image, format choices: 'aes', 'luks'
@@ -450,7 +508,10 @@ Supported options:
   backing_file=<str>     - File name of a base image
   backing_fmt=<str>      - Image format of the base image
   cluster_size=<size>    - qcow2 cluster size
-  compat=<str>           - Compatibility level (0.10 or 1.1)
+  compat=<str>           - Compatibility level (v2 [0.10] or v3 [1.1])
+  compression_type=<str> - Compression method used for image cluster compression
+  data_file=<str>        - File name of an external data file
+  data_file_raw=<bool (on/off)> - The external data file must stay valid as a raw image
   encrypt.cipher-alg=<str> - Name of encryption cipher algorithm
   encrypt.cipher-mode=<str> - Name of encryption cipher mode
   encrypt.format=<str>   - Encrypt the image, format choices: 'aes', 'luks'
@@ -482,11 +543,14 @@ Testing: convert -O qcow2 -o backing_file=TEST_DIR/t.qcow2 -o ,, -o help TEST_DI
 qemu-img: Invalid option list: ,,
 
 Testing: convert -O qcow2 -o help
-Supported options:
+Supported qcow2 options:
   backing_file=<str>     - File name of a base image
   backing_fmt=<str>      - Image format of the base image
   cluster_size=<size>    - qcow2 cluster size
-  compat=<str>           - Compatibility level (0.10 or 1.1)
+  compat=<str>           - Compatibility level (v2 [0.10] or v3 [1.1])
+  compression_type=<str> - Compression method used for image cluster compression
+  data_file=<str>        - File name of an external data file
+  data_file_raw=<bool (on/off)> - The external data file must stay valid as a raw image
   encrypt.cipher-alg=<str> - Name of encryption cipher algorithm
   encrypt.cipher-mode=<str> - Name of encryption cipher mode
   encrypt.format=<str>   - Encrypt the image, format choices: 'aes', 'luks'
@@ -501,9 +565,15 @@ Supported options:
   refcount_bits=<num>    - Width of a reference count entry in bits
   size=<size>            - Virtual disk size
 
+The protocol level may support further options.
+Specify the target filename to include those options.
+
 Testing: convert -o help
-Supported options:
+Supported raw options:
   size=<size>            - Virtual disk size
+
+The protocol level may support further options.
+Specify the target filename to include those options.
 
 Testing: convert -O bochs -o help
 qemu-img: Format driver 'bochs' does not support image creation
@@ -519,15 +589,19 @@ qemu-img: Cannot enable copy offloading when -S is used
 Testing: convert -C -c -O qcow2 TEST_DIR/t.qcow2 TEST_DIR/t.qcow2.target
 qemu-img: Cannot enable copy offloading when -c is used
 
+Testing: convert -C --salvage -O qcow2 TEST_DIR/t.qcow2 TEST_DIR/t.qcow2.target
+qemu-img: Cannot use copy offloading in salvaging mode
+
 === amend: Options specified more than once ===
 
 Testing: amend -f foo -f qcow2 -o lazy_refcounts=on TEST_DIR/t.qcow2
 image: TEST_DIR/t.IMGFMT
 file format: IMGFMT
-virtual size: 128M (134217728 bytes)
+virtual size: 128 MiB (134217728 bytes)
 cluster_size: 65536
 Format specific information:
     compat: 1.1
+    compression type: zlib
     lazy refcounts: true
     refcount bits: 16
     corrupt: false
@@ -535,10 +609,11 @@ Format specific information:
 Testing: amend -f qcow2 -o size=130M -o lazy_refcounts=off TEST_DIR/t.qcow2
 image: TEST_DIR/t.IMGFMT
 file format: IMGFMT
-virtual size: 130M (136314880 bytes)
+virtual size: 130 MiB (136314880 bytes)
 cluster_size: 65536
 Format specific information:
     compat: 1.1
+    compression type: zlib
     lazy refcounts: false
     refcount bits: 16
     corrupt: false
@@ -546,10 +621,11 @@ Format specific information:
 Testing: amend -f qcow2 -o size=8M -o lazy_refcounts=on -o size=132M TEST_DIR/t.qcow2
 image: TEST_DIR/t.IMGFMT
 file format: IMGFMT
-virtual size: 132M (138412032 bytes)
+virtual size: 132 MiB (138412032 bytes)
 cluster_size: 65536
 Format specific information:
     compat: 1.1
+    compression type: zlib
     lazy refcounts: true
     refcount bits: 16
     corrupt: false
@@ -557,7 +633,7 @@ Format specific information:
 Testing: amend -f qcow2 -o size=4M,size=148M TEST_DIR/t.qcow2
 image: TEST_DIR/t.IMGFMT
 file format: IMGFMT
-virtual size: 148M (155189248 bytes)
+virtual size: 148 MiB (155189248 bytes)
 cluster_size: 65536
 
 === amend: help for -o ===
@@ -567,7 +643,10 @@ Creation options for 'qcow2':
   backing_file=<str>     - File name of a base image
   backing_fmt=<str>      - Image format of the base image
   cluster_size=<size>    - qcow2 cluster size
-  compat=<str>           - Compatibility level (0.10 or 1.1)
+  compat=<str>           - Compatibility level (v2 [0.10] or v3 [1.1])
+  compression_type=<str> - Compression method used for image cluster compression
+  data_file=<str>        - File name of an external data file
+  data_file_raw=<bool (on/off)> - The external data file must stay valid as a raw image
   encrypt.cipher-alg=<str> - Name of encryption cipher algorithm
   encrypt.cipher-mode=<str> - Name of encryption cipher mode
   encrypt.format=<str>   - Encrypt the image, format choices: 'aes', 'luks'
@@ -589,7 +668,10 @@ Creation options for 'qcow2':
   backing_file=<str>     - File name of a base image
   backing_fmt=<str>      - Image format of the base image
   cluster_size=<size>    - qcow2 cluster size
-  compat=<str>           - Compatibility level (0.10 or 1.1)
+  compat=<str>           - Compatibility level (v2 [0.10] or v3 [1.1])
+  compression_type=<str> - Compression method used for image cluster compression
+  data_file=<str>        - File name of an external data file
+  data_file_raw=<bool (on/off)> - The external data file must stay valid as a raw image
   encrypt.cipher-alg=<str> - Name of encryption cipher algorithm
   encrypt.cipher-mode=<str> - Name of encryption cipher mode
   encrypt.format=<str>   - Encrypt the image, format choices: 'aes', 'luks'
@@ -611,7 +693,10 @@ Creation options for 'qcow2':
   backing_file=<str>     - File name of a base image
   backing_fmt=<str>      - Image format of the base image
   cluster_size=<size>    - qcow2 cluster size
-  compat=<str>           - Compatibility level (0.10 or 1.1)
+  compat=<str>           - Compatibility level (v2 [0.10] or v3 [1.1])
+  compression_type=<str> - Compression method used for image cluster compression
+  data_file=<str>        - File name of an external data file
+  data_file_raw=<bool (on/off)> - The external data file must stay valid as a raw image
   encrypt.cipher-alg=<str> - Name of encryption cipher algorithm
   encrypt.cipher-mode=<str> - Name of encryption cipher mode
   encrypt.format=<str>   - Encrypt the image, format choices: 'aes', 'luks'
@@ -633,7 +718,10 @@ Creation options for 'qcow2':
   backing_file=<str>     - File name of a base image
   backing_fmt=<str>      - Image format of the base image
   cluster_size=<size>    - qcow2 cluster size
-  compat=<str>           - Compatibility level (0.10 or 1.1)
+  compat=<str>           - Compatibility level (v2 [0.10] or v3 [1.1])
+  compression_type=<str> - Compression method used for image cluster compression
+  data_file=<str>        - File name of an external data file
+  data_file_raw=<bool (on/off)> - The external data file must stay valid as a raw image
   encrypt.cipher-alg=<str> - Name of encryption cipher algorithm
   encrypt.cipher-mode=<str> - Name of encryption cipher mode
   encrypt.format=<str>   - Encrypt the image, format choices: 'aes', 'luks'
@@ -655,7 +743,10 @@ Creation options for 'qcow2':
   backing_file=<str>     - File name of a base image
   backing_fmt=<str>      - Image format of the base image
   cluster_size=<size>    - qcow2 cluster size
-  compat=<str>           - Compatibility level (0.10 or 1.1)
+  compat=<str>           - Compatibility level (v2 [0.10] or v3 [1.1])
+  compression_type=<str> - Compression method used for image cluster compression
+  data_file=<str>        - File name of an external data file
+  data_file_raw=<bool (on/off)> - The external data file must stay valid as a raw image
   encrypt.cipher-alg=<str> - Name of encryption cipher algorithm
   encrypt.cipher-mode=<str> - Name of encryption cipher mode
   encrypt.format=<str>   - Encrypt the image, format choices: 'aes', 'luks'
@@ -677,7 +768,10 @@ Creation options for 'qcow2':
   backing_file=<str>     - File name of a base image
   backing_fmt=<str>      - Image format of the base image
   cluster_size=<size>    - qcow2 cluster size
-  compat=<str>           - Compatibility level (0.10 or 1.1)
+  compat=<str>           - Compatibility level (v2 [0.10] or v3 [1.1])
+  compression_type=<str> - Compression method used for image cluster compression
+  data_file=<str>        - File name of an external data file
+  data_file_raw=<bool (on/off)> - The external data file must stay valid as a raw image
   encrypt.cipher-alg=<str> - Name of encryption cipher algorithm
   encrypt.cipher-mode=<str> - Name of encryption cipher mode
   encrypt.format=<str>   - Encrypt the image, format choices: 'aes', 'luks'
@@ -699,7 +793,10 @@ Creation options for 'qcow2':
   backing_file=<str>     - File name of a base image
   backing_fmt=<str>      - Image format of the base image
   cluster_size=<size>    - qcow2 cluster size
-  compat=<str>           - Compatibility level (0.10 or 1.1)
+  compat=<str>           - Compatibility level (v2 [0.10] or v3 [1.1])
+  compression_type=<str> - Compression method used for image cluster compression
+  data_file=<str>        - File name of an external data file
+  data_file_raw=<bool (on/off)> - The external data file must stay valid as a raw image
   encrypt.cipher-alg=<str> - Name of encryption cipher algorithm
   encrypt.cipher-mode=<str> - Name of encryption cipher mode
   encrypt.format=<str>   - Encrypt the image, format choices: 'aes', 'luks'
@@ -721,7 +818,10 @@ Creation options for 'qcow2':
   backing_file=<str>     - File name of a base image
   backing_fmt=<str>      - Image format of the base image
   cluster_size=<size>    - qcow2 cluster size
-  compat=<str>           - Compatibility level (0.10 or 1.1)
+  compat=<str>           - Compatibility level (v2 [0.10] or v3 [1.1])
+  compression_type=<str> - Compression method used for image cluster compression
+  data_file=<str>        - File name of an external data file
+  data_file_raw=<bool (on/off)> - The external data file must stay valid as a raw image
   encrypt.cipher-alg=<str> - Name of encryption cipher algorithm
   encrypt.cipher-mode=<str> - Name of encryption cipher mode
   encrypt.format=<str>   - Encrypt the image, format choices: 'aes', 'luks'
@@ -760,7 +860,10 @@ Creation options for 'qcow2':
   backing_file=<str>     - File name of a base image
   backing_fmt=<str>      - Image format of the base image
   cluster_size=<size>    - qcow2 cluster size
-  compat=<str>           - Compatibility level (0.10 or 1.1)
+  compat=<str>           - Compatibility level (v2 [0.10] or v3 [1.1])
+  compression_type=<str> - Compression method used for image cluster compression
+  data_file=<str>        - File name of an external data file
+  data_file_raw=<bool (on/off)> - The external data file must stay valid as a raw image
   encrypt.cipher-alg=<str> - Name of encryption cipher algorithm
   encrypt.cipher-mode=<str> - Name of encryption cipher mode
   encrypt.format=<str>   - Encrypt the image, format choices: 'aes', 'luks'
@@ -777,9 +880,8 @@ Creation options for 'qcow2':
 
 Note that not all of these options may be amendable.
 
-Testing: convert -o help
-Supported options:
-  size=<size>            - Virtual disk size
+Testing: amend -o help
+qemu-img: Expecting one image file name
 
 Testing: amend -f bochs -o help
 qemu-img: Format driver 'bochs' does not support option amendment

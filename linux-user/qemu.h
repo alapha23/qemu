@@ -16,7 +16,6 @@
 #include "syscall_defs.h"
 #include "target_syscall.h"
 #include "exec/gdbstub.h"
-#include "qemu/queue.h"
 
 /* This is the size of the host kernel's sigset_t, needed where we make
  * direct system calls that take a sigset_t pointer and a size.
@@ -36,6 +35,7 @@ struct image_info {
         abi_ulong       end_data;
         abi_ulong       start_brk;
         abi_ulong       brk;
+        abi_ulong       reserve_brk;
         abi_ulong       start_mmap;
         abi_ulong       start_stack;
         abi_ulong       stack_limit;
@@ -50,7 +50,7 @@ struct image_info {
         abi_ulong       env_strings;
         abi_ulong       file_string;
         uint32_t        elf_flags;
-	int		personality;
+        int		personality;
         abi_ulong       alignment;
 
         /* The fields below are used in FDPIC mode.  */
@@ -116,7 +116,6 @@ typedef struct TaskState {
 #endif
     abi_ulong child_tidptr;
 #ifdef TARGET_M68K
-    int sim_syscalls;
     abi_ulong tp_value;
 #endif
 #if defined(TARGET_ARM) || defined(TARGET_M68K)
@@ -152,6 +151,8 @@ typedef struct TaskState {
      */
     int signal_pending;
 
+    /* This thread's sigaltstack, if it has one */
+    struct target_sigaltstack sigaltstack_used;
 } __attribute__((aligned(16))) TaskState;
 
 extern char *exec_path;
@@ -174,7 +175,7 @@ extern unsigned long mmap_min_addr;
 struct linux_binprm {
         char buf[BPRM_BUF_SIZE] __attribute__((aligned));
         abi_ulong p;
-	int fd;
+        int fd;
         int e_uid, e_gid;
         int argc, envc;
         char **argv;
@@ -210,7 +211,6 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
                     abi_long arg2, abi_long arg3, abi_long arg4,
                     abi_long arg5, abi_long arg6, abi_long arg7,
                     abi_long arg8);
-void gemu_log(const char *fmt, ...) GCC_FMT_ATTR(1, 2);
 extern __thread CPUState *thread_cpu;
 void cpu_loop(CPUArchState *env);
 const char *target_strerror(int err);
@@ -219,18 +219,27 @@ void init_qemu_uname_release(void);
 void fork_start(void);
 void fork_end(int child);
 
-/* Creates the initial guest address space in the host memory space using
- * the given host start address hint and size.  The guest_start parameter
- * specifies the start address of the guest space.  guest_base will be the
- * difference between the host start address computed by this function and
- * guest_start.  If fixed is specified, then the mapped address space must
- * start at host_start.  The real start address of the mapped memory space is
- * returned or -1 if there was an error.
+/**
+ * probe_guest_base:
+ * @image_name: the executable being loaded
+ * @loaddr: the lowest fixed address in the executable
+ * @hiaddr: the highest fixed address in the executable
+ *
+ * Creates the initial guest address space in the host memory space.
+ *
+ * If @loaddr == 0, then no address in the executable is fixed,
+ * i.e. it is fully relocatable.  In that case @hiaddr is the size
+ * of the executable.
+ *
+ * This function will not return if a valid value for guest_base
+ * cannot be chosen.  On return, the executable loader can expect
+ *
+ *    target_mmap(loaddr, hiaddr - loaddr, ...)
+ *
+ * to succeed.
  */
-unsigned long init_guest_space(unsigned long host_start,
-                               unsigned long host_size,
-                               unsigned long guest_start,
-                               bool fixed);
+void probe_guest_base(const char *image_name,
+                      abi_ulong loaddr, abi_ulong hiaddr);
 
 #include "qemu/log.h"
 
@@ -385,7 +394,6 @@ void print_syscall_ret(int num, abi_long arg1);
  * --- SIGSEGV {si_signo=SIGSEGV, si_code=SI_KERNEL, si_addr=0} ---
  */
 void print_taken_signal(int target_signum, const target_siginfo_t *tinfo);
-extern int do_strace;
 
 /* signal.c */
 void process_pending_signals(CPUArchState *cpu_env);
@@ -443,7 +451,7 @@ abi_long target_mremap(abi_ulong old_addr, abi_ulong old_size,
                        abi_ulong new_addr);
 extern unsigned long last_brk;
 extern abi_ulong mmap_next_start;
-abi_ulong mmap_find_vma(abi_ulong, abi_ulong);
+abi_ulong mmap_find_vma(abi_ulong, abi_ulong, abi_ulong);
 void mmap_fork_start(void);
 void mmap_fork_end(int child);
 
@@ -457,7 +465,9 @@ extern unsigned long guest_stack_size;
 
 static inline int access_ok(int type, abi_ulong addr, abi_ulong size)
 {
-    return page_check_range((target_ulong)addr, size,
+    return guest_addr_valid(addr) &&
+           (size == 0 || guest_addr_valid(addr + size - 1)) &&
+           page_check_range((target_ulong)addr, size,
                             (type == VERIFY_READ) ? PAGE_READ : (PAGE_READ | PAGE_WRITE)) == 0;
 }
 
@@ -474,17 +484,13 @@ static inline int access_ok(int type, abi_ulong addr, abi_ulong size)
  *   functions than host-endian unaligned load/store plus tswapN.
  * - The pragmas are necessary only to silence a clang false-positive
  *   warning: see https://bugs.llvm.org/show_bug.cgi?id=39113 .
- * - We have to disable -Wpragmas warnings to avoid a complaint about
- *   an unknown warning type from older compilers that don't know about
- *   -Waddress-of-packed-member.
  * - gcc has bugs in its _Pragma() support in some versions, eg
  *   https://gcc.gnu.org/bugzilla/show_bug.cgi?id=83256 -- so we only
  *   include the warning-suppression pragmas for clang
  */
-#ifdef __clang__
+#if defined(__clang__) && __has_warning("-Waddress-of-packed-member")
 #define PRAGMA_DISABLE_PACKED_WARNING                                   \
     _Pragma("GCC diagnostic push");                                     \
-    _Pragma("GCC diagnostic ignored \"-Wpragmas\"");                    \
     _Pragma("GCC diagnostic ignored \"-Waddress-of-packed-member\"")
 
 #define PRAGMA_REENABLE_PACKED_WARNING          \

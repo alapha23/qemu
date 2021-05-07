@@ -10,8 +10,11 @@
 
 #include "qemu/osdep.h"
 #include "qapi/error.h"
+#include "qemu/module.h"
 #include "hw/cpu/arm11mpcore.h"
 #include "hw/intc/realview_gic.h"
+#include "hw/irq.h"
+#include "hw/qdev-properties.h"
 
 #define TYPE_REALVIEW_MPCORE_RIRQ "realview_mpcore"
 #define REALVIEW_MPCORE_RIRQ(obj) \
@@ -122,7 +125,7 @@ static void mpcore_rirq_class_init(ObjectClass *klass, void *data)
     DeviceClass *dc = DEVICE_CLASS(klass);
 
     dc->realize = realview_mpcore_realize;
-    dc->props = mpcore_rirq_properties;
+    device_class_set_props(dc, mpcore_rirq_properties);
 }
 
 static const TypeInfo mpcore_rirq_info = {

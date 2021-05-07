@@ -10,8 +10,11 @@
 #include "qemu/osdep.h"
 #include "sysemu/blockdev.h"
 #include "hw/sysbus.h"
+#include "migration/vmstate.h"
+#include "hw/irq.h"
 #include "hw/sd/sd.h"
 #include "qemu/log.h"
+#include "qemu/module.h"
 #include "qapi/error.h"
 
 //#define DEBUG_PL181 1
@@ -479,7 +482,7 @@ static void pl181_reset(DeviceState *d)
     /* Since we're still using the legacy SD API the card is not plugged
      * into any bus, and we must reset it manually.
      */
-    device_reset(DEVICE(s->card));
+    device_legacy_reset(DEVICE(s->card));
 }
 
 static void pl181_init(Object *obj)

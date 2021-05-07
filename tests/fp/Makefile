@@ -29,6 +29,9 @@ QEMU_INCLUDES += -I$(TF_SOURCE_DIR)
 
 # work around TARGET_* poisoning
 QEMU_CFLAGS += -DHW_POISON_H
+# define a target to match testfloat's implementation-defined choices, such as
+# whether to raise the invalid flag when dealing with NaNs in muladd.
+QEMU_CFLAGS += -DTARGET_ARM
 
 # capstone has a platform.h file that clashes with softfloat's
 QEMU_CFLAGS := $(filter-out %capstone, $(QEMU_CFLAGS))
@@ -62,8 +65,7 @@ QEMU_CFLAGS += $(TF_OPTS)
 TF_CFLAGS :=
 TF_CFLAGS += -Wno-strict-prototypes
 TF_CFLAGS += -Wno-unknown-pragmas
-TF_CFLAGS += -Wno-discarded-qualifiers
-TF_CFLAGS += -Wno-maybe-uninitialized
+TF_CFLAGS += -Wno-uninitialized
 TF_CFLAGS += -Wno-missing-prototypes
 TF_CFLAGS += -Wno-return-type
 TF_CFLAGS += -Wno-unused-function
@@ -550,17 +552,15 @@ TF_OBJS_LIB += $(TF_OBJS_WRITECASE)
 TF_OBJS_LIB += testLoops_common.o
 TF_OBJS_LIB += $(TF_OBJS_TEST)
 
-BINARIES := fp-test$(EXESUF)
+BINARIES := fp-test$(EXESUF) fp-bench$(EXESUF)
 
-# everything depends on config-host.h because platform.h includes it
-all: $(BUILD_DIR)/config-host.h
-	$(MAKE) $(BINARIES)
+# We require artefacts from the main build including config-host.h
+# because platform.h includes it. Rather than re-invoking the main
+# build we just error out if things aren't there.
+$(LIBQEMUUTIL) $(BUILD_DIR)/config-host.h:
+	$(error $@ missing, re-run parent build)
 
-$(LIBQEMUUTIL):
-	$(MAKE) -C $(BUILD_DIR) libqemuutil.a
-
-$(BUILD_DIR)/config-host.h:
-	$(MAKE) -C $(BUILD_DIR) config-host.h
+all: $(BUILD_DIR)/config-host.h $(BINARIES)
 
 # libtestfloat.a depends on libsoftfloat.a, so specify it first
 FP_TEST_LIBS := libtestfloat.a libsoftfloat.a $(LIBQEMUUTIL)
@@ -587,10 +587,13 @@ $(TF_OBJS_LIB) slowfloat.o: %.o: $(TF_SOURCE_DIR)/%.c
 
 libtestfloat.a: $(TF_OBJS_LIB)
 
+fp-bench$(EXESUF): fp-bench.o $(QEMU_SOFTFLOAT_OBJ) $(LIBQEMUUTIL)
+
 clean:
 	rm -f *.o *.d $(BINARIES)
 	rm -f *.gcno *.gcda *.gcov
 	rm -f fp-test$(EXESUF)
+	rm -f fp-bench$(EXESUF)
 	rm -f libsoftfloat.a
 	rm -f libtestfloat.a
 

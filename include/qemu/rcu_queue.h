@@ -206,47 +206,50 @@ extern "C" {
 #define QTAILQ_INSERT_HEAD_RCU(head, elm, field) do {                   \
     (elm)->field.tqe_next = (head)->tqh_first;                          \
     if ((elm)->field.tqe_next != NULL) {                                \
-        (head)->tqh_first->field.tqe_prev = &(elm)->field.tqe_next;     \
+        (head)->tqh_first->field.tqe_circ.tql_prev =                    \
+            &(elm)->field.tqe_circ;                                     \
     } else {                                                            \
-        (head)->tqh_last = &(elm)->field.tqe_next;                      \
+        (head)->tqh_circ.tql_prev = &(elm)->field.tqe_circ;             \
     }                                                                   \
     atomic_rcu_set(&(head)->tqh_first, (elm));                          \
-    (elm)->field.tqe_prev = &(head)->tqh_first;                         \
+    (elm)->field.tqe_circ.tql_prev = &(head)->tqh_circ;                 \
 } while (/*CONSTCOND*/0)
 
-#define QTAILQ_INSERT_TAIL_RCU(head, elm, field) do {               \
-    (elm)->field.tqe_next = NULL;                                   \
-    (elm)->field.tqe_prev = (head)->tqh_last;                       \
-    atomic_rcu_set((head)->tqh_last, (elm));                        \
-    (head)->tqh_last = &(elm)->field.tqe_next;                      \
+#define QTAILQ_INSERT_TAIL_RCU(head, elm, field) do {                   \
+    (elm)->field.tqe_next = NULL;                                       \
+    (elm)->field.tqe_circ.tql_prev = (head)->tqh_circ.tql_prev;         \
+    atomic_rcu_set(&(head)->tqh_circ.tql_prev->tql_next, (elm));        \
+    (head)->tqh_circ.tql_prev = &(elm)->field.tqe_circ;                 \
 } while (/*CONSTCOND*/0)
 
 #define QTAILQ_INSERT_AFTER_RCU(head, listelm, elm, field) do {         \
     (elm)->field.tqe_next = (listelm)->field.tqe_next;                  \
     if ((elm)->field.tqe_next != NULL) {                                \
-        (elm)->field.tqe_next->field.tqe_prev = &(elm)->field.tqe_next; \
+        (elm)->field.tqe_next->field.tqe_circ.tql_prev =                \
+            &(elm)->field.tqe_circ;                                     \
     } else {                                                            \
-        (head)->tqh_last = &(elm)->field.tqe_next;                      \
+        (head)->tqh_circ.tql_prev = &(elm)->field.tqe_circ;             \
     }                                                                   \
     atomic_rcu_set(&(listelm)->field.tqe_next, (elm));                  \
-    (elm)->field.tqe_prev = &(listelm)->field.tqe_next;                 \
+    (elm)->field.tqe_circ.tql_prev = &(listelm)->field.tqe_circ;        \
 } while (/*CONSTCOND*/0)
 
-#define QTAILQ_INSERT_BEFORE_RCU(listelm, elm, field) do {          \
-    (elm)->field.tqe_prev = (listelm)->field.tqe_prev;              \
-    (elm)->field.tqe_next = (listelm);                              \
-    atomic_rcu_set((listelm)->field.tqe_prev, (elm));               \
-    (listelm)->field.tqe_prev = &(elm)->field.tqe_next;             \
-    } while (/*CONSTCOND*/0)
+#define QTAILQ_INSERT_BEFORE_RCU(listelm, elm, field) do {                \
+    (elm)->field.tqe_circ.tql_prev = (listelm)->field.tqe_circ.tql_prev;  \
+    (elm)->field.tqe_next = (listelm);                                    \
+    atomic_rcu_set(&(listelm)->field.tqe_circ.tql_prev->tql_next, (elm)); \
+    (listelm)->field.tqe_circ.tql_prev = &(elm)->field.tqe_circ;          \
+} while (/*CONSTCOND*/0)
 
 #define QTAILQ_REMOVE_RCU(head, elm, field) do {                        \
     if (((elm)->field.tqe_next) != NULL) {                              \
-        (elm)->field.tqe_next->field.tqe_prev = (elm)->field.tqe_prev;  \
+        (elm)->field.tqe_next->field.tqe_circ.tql_prev =                \
+            (elm)->field.tqe_circ.tql_prev;                             \
     } else {                                                            \
-        (head)->tqh_last = (elm)->field.tqe_prev;                       \
+        (head)->tqh_circ.tql_prev = (elm)->field.tqe_circ.tql_prev;     \
     }                                                                   \
-    atomic_set((elm)->field.tqe_prev, (elm)->field.tqe_next);           \
-    (elm)->field.tqe_prev = NULL;                                       \
+    atomic_set(&(elm)->field.tqe_circ.tql_prev->tql_next, (elm)->field.tqe_next); \
+    (elm)->field.tqe_circ.tql_prev = NULL;                              \
 } while (/*CONSTCOND*/0)
 
 #define QTAILQ_FOREACH_RCU(var, head, field)                            \
@@ -257,6 +260,53 @@ extern "C" {
 #define QTAILQ_FOREACH_SAFE_RCU(var, head, field, next)                  \
     for ((var) = atomic_rcu_read(&(head)->tqh_first);                    \
          (var) && ((next) = atomic_rcu_read(&(var)->field.tqe_next), 1); \
+         (var) = (next))
+
+/*
+ * RCU singly-linked list
+ */
+
+/* Singly-linked list access methods */
+#define QSLIST_EMPTY_RCU(head)      (atomic_read(&(head)->slh_first) == NULL)
+#define QSLIST_FIRST_RCU(head)       atomic_rcu_read(&(head)->slh_first)
+#define QSLIST_NEXT_RCU(elm, field)  atomic_rcu_read(&(elm)->field.sle_next)
+
+/* Singly-linked list functions */
+#define QSLIST_INSERT_HEAD_RCU(head, elm, field) do {           \
+    (elm)->field.sle_next = (head)->slh_first;                  \
+    atomic_rcu_set(&(head)->slh_first, (elm));                  \
+} while (/*CONSTCOND*/0)
+
+#define QSLIST_INSERT_AFTER_RCU(head, listelm, elm, field) do {         \
+    (elm)->field.sle_next = (listelm)->field.sle_next;                  \
+    atomic_rcu_set(&(listelm)->field.sle_next, (elm));                  \
+} while (/*CONSTCOND*/0)
+
+#define QSLIST_REMOVE_HEAD_RCU(head, field) do {                       \
+    atomic_set(&(head)->slh_first, (head)->slh_first->field.sle_next); \
+} while (/*CONSTCOND*/0)
+
+#define QSLIST_REMOVE_RCU(head, elm, type, field) do {              \
+    if ((head)->slh_first == (elm)) {                               \
+        QSLIST_REMOVE_HEAD_RCU((head), field);                      \
+    } else {                                                        \
+        struct type *curr = (head)->slh_first;                      \
+        while (curr->field.sle_next != (elm)) {                     \
+            curr = curr->field.sle_next;                            \
+        }                                                           \
+        atomic_set(&curr->field.sle_next,                           \
+                   curr->field.sle_next->field.sle_next);           \
+    }                                                               \
+} while (/*CONSTCOND*/0)
+
+#define QSLIST_FOREACH_RCU(var, head, field)                          \
+    for ((var) = atomic_rcu_read(&(head)->slh_first);                   \
+         (var);                                                         \
+         (var) = atomic_rcu_read(&(var)->field.sle_next))
+
+#define QSLIST_FOREACH_SAFE_RCU(var, head, field, next)                \
+    for ((var) = atomic_rcu_read(&(head)->slh_first);                    \
+         (var) && ((next) = atomic_rcu_read(&(var)->field.sle_next), 1); \
          (var) = (next))
 
 #ifdef __cplusplus

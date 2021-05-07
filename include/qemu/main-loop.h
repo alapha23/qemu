@@ -295,11 +295,34 @@ void qemu_mutex_lock_iothread_impl(const char *file, int line);
  */
 void qemu_mutex_unlock_iothread(void);
 
+/*
+ * qemu_cond_wait_iothread: Wait on condition for the main loop mutex
+ *
+ * This function atomically releases the main loop mutex and causes
+ * the calling thread to block on the condition.
+ */
+void qemu_cond_wait_iothread(QemuCond *cond);
+
 /* internal interfaces */
 
 void qemu_fd_register(int fd);
 
 QEMUBH *qemu_bh_new(QEMUBHFunc *cb, void *opaque);
 void qemu_bh_schedule_idle(QEMUBH *bh);
+
+enum {
+    MAIN_LOOP_POLL_FILL,
+    MAIN_LOOP_POLL_ERR,
+    MAIN_LOOP_POLL_OK,
+};
+
+typedef struct MainLoopPoll {
+    int state;
+    uint32_t timeout;
+    GArray *pollfds;
+} MainLoopPoll;
+
+void main_loop_poll_add_notifier(Notifier *notify);
+void main_loop_poll_remove_notifier(Notifier *notify);
 
 #endif

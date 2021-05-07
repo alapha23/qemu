@@ -33,20 +33,6 @@
 #else
 #include "exec/poison.h"
 #endif
-#ifdef __COVERITY__
-/* Coverity does not like the new _Float* types that are used by
- * recent glibc, and croaks on every single file that includes
- * stdlib.h.  These typedefs are enough to please it.
- *
- * Note that these fix parse errors so they cannot be placed in
- * scripts/coverity-model.c.
- */
-typedef float _Float32;
-typedef double _Float32x;
-typedef double _Float64;
-typedef __float80 _Float64x;
-typedef __float128 _Float128;
-#endif
 
 #include "qemu/compiler.h"
 
@@ -74,6 +60,22 @@ typedef __float128 _Float128;
 extern int daemon(int, int);
 #endif
 
+#ifdef _WIN32
+/* as defined in sdkddkver.h */
+#ifndef _WIN32_WINNT
+#define _WIN32_WINNT 0x0600 /* Vista */
+#endif
+/* reduces the number of implicitly included headers */
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#endif
+
+/* enable C99/POSIX format strings (needs mingw32-runtime 3.15 or later) */
+#ifdef __MINGW32__
+#define __USE_MINGW_ANSI_STDIO 1
+#endif
+
 #include <stdarg.h>
 #include <stddef.h>
 #include <stdbool.h>
@@ -81,6 +83,7 @@ extern int daemon(int, int);
 #include <sys/types.h>
 #include <stdlib.h>
 #include <stdio.h>
+
 #include <string.h>
 #include <strings.h>
 #include <inttypes.h>
@@ -92,6 +95,7 @@ extern int daemon(int, int);
 #include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <getopt.h>
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <assert.h>
@@ -375,7 +379,7 @@ void qemu_anon_ram_free(void *ptr, size_t size);
 #define HAVE_CHARDEV_SERIAL 1
 #elif defined(__linux__) || defined(__sun__) || defined(__FreeBSD__)    \
     || defined(__NetBSD__) || defined(__OpenBSD__) || defined(__DragonFly__) \
-    || defined(__GLIBC__)
+    || defined(__GLIBC__) || defined(__APPLE__)
 #define HAVE_CHARDEV_SERIAL 1
 #endif
 
@@ -405,9 +409,9 @@ void qemu_anon_ram_free(void *ptr, size_t size);
 #  define QEMU_VMALLOC_ALIGN (256 * 4096)
 #elif defined(__linux__) && defined(__sparc__)
 #include <sys/shm.h>
-#  define QEMU_VMALLOC_ALIGN MAX(getpagesize(), SHMLBA)
+#  define QEMU_VMALLOC_ALIGN MAX(qemu_real_host_page_size, SHMLBA)
 #else
-#  define QEMU_VMALLOC_ALIGN getpagesize()
+#  define QEMU_VMALLOC_ALIGN qemu_real_host_page_size
 #endif
 
 #ifdef CONFIG_POSIX
@@ -444,6 +448,7 @@ int qemu_mprotect_none(void *addr, size_t size);
 
 int qemu_open(const char *name, int flags, ...);
 int qemu_close(int fd);
+int qemu_unlink(const char *name);
 #ifndef _WIN32
 int qemu_dup(int fd);
 #endif
@@ -586,5 +591,20 @@ extern int qemu_icache_linesize;
 extern int qemu_icache_linesize_log;
 extern int qemu_dcache_linesize;
 extern int qemu_dcache_linesize_log;
+
+/*
+ * After using getopt or getopt_long, if you need to parse another set
+ * of options, then you must reset optind.  Unfortunately the way to
+ * do this varies between implementations of getopt.
+ */
+static inline void qemu_reset_optind(void)
+{
+#ifdef HAVE_OPTRESET
+    optind = 1;
+    optreset = 1;
+#else
+    optind = 0;
+#endif
+}
 
 #endif

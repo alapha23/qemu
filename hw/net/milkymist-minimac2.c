@@ -24,13 +24,15 @@
 
 #include "qemu/osdep.h"
 #include "qapi/error.h"
-#include "qemu-common.h"
 #include "cpu.h" /* FIXME: why does this use TARGET_PAGE_ALIGN? */
-#include "hw/hw.h"
+#include "hw/irq.h"
+#include "hw/qdev-properties.h"
 #include "hw/sysbus.h"
+#include "migration/vmstate.h"
 #include "trace.h"
 #include "net/net.h"
 #include "qemu/log.h"
+#include "qemu/module.h"
 #include "qemu/error-report.h"
 
 #include <zlib.h>
@@ -528,7 +530,7 @@ static void milkymist_minimac2_class_init(ObjectClass *klass, void *data)
     dc->realize = milkymist_minimac2_realize;
     dc->reset = milkymist_minimac2_reset;
     dc->vmsd = &vmstate_milkymist_minimac2;
-    dc->props = milkymist_minimac2_properties;
+    device_class_set_props(dc, milkymist_minimac2_properties);
 }
 
 static const TypeInfo milkymist_minimac2_info = {

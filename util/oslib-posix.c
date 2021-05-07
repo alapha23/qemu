@@ -31,10 +31,12 @@
 
 #include <glib/gprintf.h>
 
+#include "qemu-common.h"
 #include "sysemu/sysemu.h"
 #include "trace.h"
 #include "qapi/error.h"
 #include "qemu/sockets.h"
+#include "qemu/thread.h"
 #include <libgen.h>
 #include <sys/signal.h>
 #include "qemu/cutils.h"
@@ -73,6 +75,10 @@ typedef struct MemsetThread MemsetThread;
 static MemsetThread *memset_thread;
 static int memset_num_threads;
 static bool memset_thread_failed;
+
+static QemuMutex page_mutex;
+static QemuCond page_cond;
+static bool threads_created_flag;
 
 int qemu_get_thread_id(void)
 {
@@ -203,7 +209,7 @@ void *qemu_memalign(size_t alignment, size_t size)
 void *qemu_anon_ram_alloc(size_t size, uint64_t *alignment, bool shared)
 {
     size_t align = QEMU_VMALLOC_ALIGN;
-    void *ptr = qemu_ram_mmap(-1, size, align, shared);
+    void *ptr = qemu_ram_mmap(-1, size, align, shared, false);
 
     if (ptr == MAP_FAILED) {
         return NULL;
@@ -226,21 +232,37 @@ void qemu_vfree(void *ptr)
 void qemu_anon_ram_free(void *ptr, size_t size)
 {
     trace_qemu_anon_ram_free(ptr, size);
-    qemu_ram_munmap(ptr, size);
+    qemu_ram_munmap(-1, ptr, size);
 }
 
 void qemu_set_block(int fd)
 {
     int f;
     f = fcntl(fd, F_GETFL);
-    fcntl(fd, F_SETFL, f & ~O_NONBLOCK);
+    assert(f != -1);
+    f = fcntl(fd, F_SETFL, f & ~O_NONBLOCK);
+    assert(f != -1);
 }
 
 void qemu_set_nonblock(int fd)
 {
     int f;
     f = fcntl(fd, F_GETFL);
-    fcntl(fd, F_SETFL, f | O_NONBLOCK);
+    assert(f != -1);
+    f = fcntl(fd, F_SETFL, f | O_NONBLOCK);
+#ifdef __OpenBSD__
+    if (f == -1) {
+        /*
+         * Previous to OpenBSD 6.3, fcntl(F_SETFL) is not permitted on
+         * memory devices and sets errno to ENODEV.
+         * It's OK if we fail to set O_NONBLOCK on devices like /dev/null,
+         * because they will never block anyway.
+         */
+        assert(errno == ENODEV);
+    }
+#else
+    assert(f != -1);
+#endif
 }
 
 int socket_set_fast_reuse(int fd)
@@ -385,6 +407,17 @@ static void *do_touch_pages(void *arg)
     MemsetThread *memset_args = (MemsetThread *)arg;
     sigset_t set, oldset;
 
+    /*
+     * On Linux, the page faults from the loop below can cause mmap_sem
+     * contention with allocation of the thread stacks.  Do not start
+     * clearing until all threads have been created.
+     */
+    qemu_mutex_lock(&page_mutex);
+    while(!threads_created_flag){
+        qemu_cond_wait(&page_cond, &page_mutex);
+    }
+    qemu_mutex_unlock(&page_mutex);
+
     /* unblock SIGBUS */
     sigemptyset(&set);
     sigaddset(&set, SIGBUS);
@@ -433,27 +466,38 @@ static inline int get_memset_num_threads(int smp_cpus)
 static bool touch_all_pages(char *area, size_t hpagesize, size_t numpages,
                             int smp_cpus)
 {
-    size_t numpages_per_thread;
-    size_t size_per_thread;
+    static gsize initialized = 0;
+    size_t numpages_per_thread, leftover;
     char *addr = area;
     int i = 0;
 
+    if (g_once_init_enter(&initialized)) {
+        qemu_mutex_init(&page_mutex);
+        qemu_cond_init(&page_cond);
+        g_once_init_leave(&initialized, 1);
+    }
+
     memset_thread_failed = false;
+    threads_created_flag = false;
     memset_num_threads = get_memset_num_threads(smp_cpus);
     memset_thread = g_new0(MemsetThread, memset_num_threads);
-    numpages_per_thread = (numpages / memset_num_threads);
-    size_per_thread = (hpagesize * numpages_per_thread);
+    numpages_per_thread = numpages / memset_num_threads;
+    leftover = numpages % memset_num_threads;
     for (i = 0; i < memset_num_threads; i++) {
         memset_thread[i].addr = addr;
-        memset_thread[i].numpages = (i == (memset_num_threads - 1)) ?
-                                    numpages : numpages_per_thread;
+        memset_thread[i].numpages = numpages_per_thread + (i < leftover);
         memset_thread[i].hpagesize = hpagesize;
         qemu_thread_create(&memset_thread[i].pgthread, "touch_pages",
                            do_touch_pages, &memset_thread[i],
                            QEMU_THREAD_JOINABLE);
-        addr += size_per_thread;
-        numpages -= numpages_per_thread;
+        addr += memset_thread[i].numpages * hpagesize;
     }
+
+    qemu_mutex_lock(&page_mutex);
+    threads_created_flag = true;
+    qemu_cond_broadcast(&page_cond);
+    qemu_mutex_unlock(&page_mutex);
+
     for (i = 0; i < memset_num_threads; i++) {
         qemu_thread_join(&memset_thread[i].pgthread);
     }
@@ -495,7 +539,6 @@ void os_mem_prealloc(int fd, char *area, size_t memory, int smp_cpus,
         exit(1);
     }
 }
-
 
 char *qemu_get_pid_name(pid_t pid)
 {
@@ -600,7 +643,7 @@ void *qemu_alloc_stack(size_t *sz)
 #ifdef CONFIG_DEBUG_STACK_USAGE
     void *ptr2;
 #endif
-    size_t pagesz = getpagesize();
+    size_t pagesz = qemu_real_host_page_size;
 #ifdef _SC_THREAD_STACK_MIN
     /* avoid stacks smaller than _SC_THREAD_STACK_MIN */
     long min_stack_sz = sysconf(_SC_THREAD_STACK_MIN);
@@ -662,7 +705,7 @@ void qemu_free_stack(void *stack, size_t sz)
     unsigned int usage;
     void *ptr;
 
-    for (ptr = stack + getpagesize(); ptr < stack + sz;
+    for (ptr = stack + qemu_real_host_page_size; ptr < stack + sz;
          ptr += sizeof(uint32_t)) {
         if (*(uint32_t *)ptr != 0xdeadbeaf) {
             break;

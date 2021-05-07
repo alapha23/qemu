@@ -29,16 +29,20 @@
  */
 
 #include "qemu/osdep.h"
-#include "hw/hw.h"
+#include "qemu-common.h"
 #include "hw/ppc/mac.h"
+#include "hw/qdev-properties.h"
+#include "migration/vmstate.h"
 #include "hw/input/adb.h"
+#include "hw/irq.h"
 #include "hw/misc/mos6522.h"
 #include "hw/misc/macio/gpio.h"
 #include "hw/misc/macio/pmu.h"
 #include "qemu/timer.h"
-#include "sysemu/sysemu.h"
+#include "sysemu/runstate.h"
 #include "qemu/cutils.h"
 #include "qemu/log.h"
+#include "qemu/module.h"
 #include "trace.h"
 
 
@@ -754,7 +758,7 @@ static void pmu_realize(DeviceState *dev, Error **errp)
 
     if (s->has_adb) {
         qbus_create_inplace(&s->adb_bus, sizeof(s->adb_bus), TYPE_ADB_BUS,
-                            DEVICE(dev), "adb.0");
+                            dev, "adb.0");
         s->adb_poll_timer = timer_new_ms(QEMU_CLOCK_VIRTUAL, pmu_adb_poll, s);
         s->adb_poll_mask = 0xffff;
         s->autopoll_rate_ms = 20;
@@ -769,7 +773,7 @@ static void pmu_init(Object *obj)
     object_property_add_link(obj, "gpio", TYPE_MACIO_GPIO,
                              (Object **) &s->gpio,
                              qdev_prop_allow_set_link_before_realize,
-                             0, NULL);
+                             0);
 
     sysbus_init_child_obj(obj, "mos6522-pmu", &s->mos6522_pmu,
                           sizeof(s->mos6522_pmu), TYPE_MOS6522_PMU);
@@ -791,7 +795,7 @@ static void pmu_class_init(ObjectClass *oc, void *data)
     dc->realize = pmu_realize;
     dc->reset = pmu_reset;
     dc->vmsd = &vmstate_pmu;
-    dc->props = pmu_properties;
+    device_class_set_props(dc, pmu_properties);
     set_bit(DEVICE_CATEGORY_BRIDGE, dc->categories);
 }
 

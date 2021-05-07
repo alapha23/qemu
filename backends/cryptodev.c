@@ -23,7 +23,6 @@
 
 #include "qemu/osdep.h"
 #include "sysemu/cryptodev.h"
-#include "hw/boards.h"
 #include "qapi/error.h"
 #include "qapi/visitor.h"
 #include "qemu/config-file.h"
@@ -177,19 +176,10 @@ cryptodev_backend_complete(UserCreatable *uc, Error **errp)
 {
     CryptoDevBackend *backend = CRYPTODEV_BACKEND(uc);
     CryptoDevBackendClass *bc = CRYPTODEV_BACKEND_GET_CLASS(uc);
-    Error *local_err = NULL;
 
     if (bc->init) {
-        bc->init(backend, &local_err);
-        if (local_err) {
-            goto out;
-        }
+        bc->init(backend, errp);
     }
-
-    return;
-
-out:
-    error_propagate(errp, local_err);
 }
 
 void cryptodev_backend_set_used(CryptoDevBackend *backend, bool used)
@@ -223,7 +213,7 @@ static void cryptodev_backend_instance_init(Object *obj)
     object_property_add(obj, "queues", "uint32",
                           cryptodev_backend_get_queues,
                           cryptodev_backend_set_queues,
-                          NULL, NULL, NULL);
+                          NULL, NULL);
     /* Initialize devices' queues property to 1 */
     object_property_set_int(obj, 1, "queues", NULL);
 }

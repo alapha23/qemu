@@ -25,8 +25,12 @@
  */
 
 #include "qemu/osdep.h"
+#include "hw/irq.h"
+#include "hw/qdev-properties.h"
 #include "hw/sysbus.h"
+#include "migration/vmstate.h"
 #include "qemu/log.h"
+#include "qemu/module.h"
 #include "net/net.h"
 
 #ifdef DEBUG_XGMAC
@@ -410,7 +414,7 @@ static void xgmac_enet_class_init(ObjectClass *klass, void *data)
 
     dc->realize = xgmac_enet_realize;
     dc->vmsd = &vmstate_xgmac;
-    dc->props = xgmac_properties;
+    device_class_set_props(dc, xgmac_properties);
 }
 
 static const TypeInfo xgmac_enet_info = {

@@ -22,16 +22,20 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+
 #include "qemu/osdep.h"
 #include "qapi/error.h"
-#include "hw/hw.h"
+#include "qemu/module.h"
 #include "hw/ppc/mac.h"
 #include "hw/misc/macio/cuda.h"
 #include "hw/pci/pci.h"
 #include "hw/ppc/mac_dbdma.h"
+#include "hw/qdev-properties.h"
+#include "migration/vmstate.h"
 #include "hw/char/escc.h"
 #include "hw/misc/macio/macio.h"
 #include "hw/intc/heathrow_pic.h"
+#include "sysemu/sysemu.h"
 #include "trace.h"
 
 /* Note: this code is strongly inspirated from the corresponding code
@@ -237,7 +241,7 @@ static void macio_oldworld_init(Object *obj)
     object_property_add_link(obj, "pic", TYPE_HEATHROW,
                              (Object **) &os->pic,
                              qdev_prop_allow_set_link_before_realize,
-                             0, NULL);
+                             0);
 
     macio_init_child_obj(s, "cuda", &s->cuda, sizeof(s->cuda), TYPE_CUDA);
 
@@ -346,12 +350,12 @@ static void macio_newworld_realize(PCIDevice *d, Error **errp)
         object_property_set_bool(OBJECT(&ns->gpio), true, "realized", &err);
 
         /* PMU */
-        object_initialize(&s->pmu, sizeof(s->pmu), TYPE_VIA_PMU);
+        object_initialize_child(OBJECT(s), "pmu", &s->pmu, sizeof(s->pmu),
+                                TYPE_VIA_PMU, &error_abort, NULL);
         object_property_set_link(OBJECT(&s->pmu), OBJECT(sysbus_dev), "gpio",
                                  &error_abort);
         qdev_prop_set_bit(DEVICE(&s->pmu), "has-adb", ns->has_adb);
         qdev_set_parent_bus(DEVICE(&s->pmu), BUS(&s->macio_bus));
-        object_property_add_child(OBJECT(s), "pmu", OBJECT(&s->pmu), NULL);
 
         object_property_set_bool(OBJECT(&s->pmu), true, "realized", &err);
         if (err) {
@@ -365,9 +369,9 @@ static void macio_newworld_realize(PCIDevice *d, Error **errp)
                                     sysbus_mmio_get_region(sysbus_dev, 0));
     } else {
         /* CUDA */
-        object_initialize(&s->cuda, sizeof(s->cuda), TYPE_CUDA);
+        object_initialize_child(OBJECT(s), "cuda", &s->cuda, sizeof(s->cuda),
+                                TYPE_CUDA, &error_abort, NULL);
         qdev_set_parent_bus(DEVICE(&s->cuda), BUS(&s->macio_bus));
-        object_property_add_child(OBJECT(s), "cuda", OBJECT(&s->cuda), NULL);
         qdev_prop_set_uint64(DEVICE(&s->cuda), "timebase-frequency",
                              s->frequency);
 
@@ -393,7 +397,7 @@ static void macio_newworld_init(Object *obj)
     object_property_add_link(obj, "pic", TYPE_OPENPIC,
                              (Object **) &ns->pic,
                              qdev_prop_allow_set_link_before_realize,
-                             0, NULL);
+                             0);
 
     macio_init_child_obj(s, "gpio", &ns->gpio, sizeof(ns->gpio),
                          TYPE_MACIO_GPIO);
@@ -462,7 +466,7 @@ static void macio_newworld_class_init(ObjectClass *oc, void *data)
     pdc->realize = macio_newworld_realize;
     pdc->device_id = PCI_DEVICE_ID_APPLE_UNI_N_KEYL;
     dc->vmsd = &vmstate_macio_newworld;
-    dc->props = macio_newworld_properties;
+    device_class_set_props(dc, macio_newworld_properties);
 }
 
 static Property macio_properties[] = {
@@ -477,7 +481,7 @@ static void macio_class_init(ObjectClass *klass, void *data)
 
     k->vendor_id = PCI_VENDOR_ID_APPLE;
     k->class_id = PCI_CLASS_OTHERS << 8;
-    dc->props = macio_properties;
+    device_class_set_props(dc, macio_properties);
     set_bit(DEVICE_CATEGORY_BRIDGE, dc->categories);
     /* Reason: Uses serial_hds in macio_instance_init */
     dc->user_creatable = false;

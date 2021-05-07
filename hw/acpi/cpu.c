@@ -1,5 +1,6 @@
 #include "qemu/osdep.h"
 #include "hw/boards.h"
+#include "migration/vmstate.h"
 #include "hw/acpi/cpu.h"
 #include "qapi/error.h"
 #include "qapi/qapi-events-misc.h"
@@ -11,11 +12,13 @@
 #define ACPI_CPU_FLAGS_OFFSET_RW 4
 #define ACPI_CPU_CMD_OFFSET_WR 5
 #define ACPI_CPU_CMD_DATA_OFFSET_RW 8
+#define ACPI_CPU_CMD_DATA2_OFFSET_R 0
 
 enum {
     CPHP_GET_NEXT_CPU_WITH_EVENT_CMD = 0,
     CPHP_OST_EVENT_CMD = 1,
     CPHP_OST_STATUS_CMD = 2,
+    CPHP_GET_CPU_ID_CMD = 3,
     CPHP_CMD_MAX
 };
 
@@ -73,10 +76,26 @@ static uint64_t cpu_hotplug_rd(void *opaque, hwaddr addr, unsigned size)
         case CPHP_GET_NEXT_CPU_WITH_EVENT_CMD:
            val = cpu_st->selector;
            break;
+        case CPHP_GET_CPU_ID_CMD:
+           val = cdev->arch_id & 0xFFFFFFFF;
+           break;
         default:
            break;
         }
         trace_cpuhp_acpi_read_cmd_data(cpu_st->selector, val);
+        break;
+    case ACPI_CPU_CMD_DATA2_OFFSET_R:
+        switch (cpu_st->command) {
+        case CPHP_GET_NEXT_CPU_WITH_EVENT_CMD:
+           val = 0;
+           break;
+        case CPHP_GET_CPU_ID_CMD:
+           val = cdev->arch_id >> 32;
+           break;
+        default:
+           break;
+        }
+        trace_cpuhp_acpi_read_cmd_data2(cpu_st->selector, val);
         break;
     default:
         break;
@@ -126,6 +145,7 @@ static void cpu_hotplug_wr(void *opaque, hwaddr addr, uint64_t data,
             dev = DEVICE(cdev->cpu);
             hotplug_ctrl = qdev_get_hotplug_handler(dev);
             hotplug_handler_unplug(hotplug_ctrl, dev, NULL);
+            object_unparent(OBJECT(dev));
         }
         break;
     case ACPI_CPU_CMD_OFFSET_WR:
@@ -202,7 +222,7 @@ void cpu_hotplug_hw_init(MemoryRegion *as, Object *owner,
         state->devs[i].arch_id = id_list->cpus[i].arch_id;
     }
     memory_region_init_io(&state->ctrl_reg, owner, &cpu_hotplug_ops, state,
-                          "acpi-mem-hotplug", ACPI_CPU_HOTPLUG_REG_LEN);
+                          "acpi-cpu-hotplug", ACPI_CPU_HOTPLUG_REG_LEN);
     memory_region_add_subregion(as, base_addr, &state->ctrl_reg);
 }
 
@@ -508,7 +528,7 @@ void build_cpus_aml(Aml *table, MachineState *machine, CPUHotplugFeatures opts,
             GArray *madt_buf = g_array_new(0, 1, 1);
             int arch_id = arch_ids->cpus[i].arch_id;
 
-            if (opts.apci_1_compatible && arch_id < 255) {
+            if (opts.acpi_1_compatible && arch_id < 255) {
                 dev = aml_processor(i, 0, 0, CPU_NAME_FMT, i);
             } else {
                 dev = aml_device(CPU_NAME_FMT, i);

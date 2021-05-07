@@ -11,18 +11,21 @@
  *
  */
 
+#include "qemu/osdep.h"
+
 #include <linux/kvm.h>
 #include <linux/psp-sev.h>
 
 #include <sys/ioctl.h>
 
-#include "qemu/osdep.h"
 #include "qapi/error.h"
 #include "qom/object_interfaces.h"
 #include "qemu/base64.h"
+#include "qemu/module.h"
 #include "sysemu/kvm.h"
 #include "sev_i386.h"
 #include "sysemu/sysemu.h"
+#include "sysemu/runstate.h"
 #include "trace.h"
 #include "migration/blocker.h"
 
@@ -130,6 +133,17 @@ sev_ram_block_added(RAMBlockNotifier *n, void *host, size_t size)
 {
     int r;
     struct kvm_enc_region range;
+    ram_addr_t offset;
+    MemoryRegion *mr;
+
+    /*
+     * The RAM device presents a memory region that should be treated
+     * as IO region and should not be pinned.
+     */
+    mr = memory_region_from_host(host, &offset);
+    if (mr && memory_region_is_ram_device(mr)) {
+        return;
+    }
 
     range.addr = (__u64)(unsigned long)host;
     range.size = size;
@@ -148,6 +162,17 @@ sev_ram_block_removed(RAMBlockNotifier *n, void *host, size_t size)
 {
     int r;
     struct kvm_enc_region range;
+    ram_addr_t offset;
+    MemoryRegion *mr;
+
+    /*
+     * The RAM device presents a memory region that should be treated
+     * as IO region and should not have been pinned.
+     */
+    mr = memory_region_from_host(host, &offset);
+    if (mr && memory_region_is_ram_device(mr)) {
+        return;
+    }
 
     range.addr = (__u64)(unsigned long)host;
     range.size = size;
@@ -223,110 +248,19 @@ qsev_guest_class_init(ObjectClass *oc, void *data)
 {
     object_class_property_add_str(oc, "sev-device",
                                   qsev_guest_get_sev_device,
-                                  qsev_guest_set_sev_device,
-                                  NULL);
+                                  qsev_guest_set_sev_device);
     object_class_property_set_description(oc, "sev-device",
-            "SEV device to use", NULL);
+            "SEV device to use");
     object_class_property_add_str(oc, "dh-cert-file",
                                   qsev_guest_get_dh_cert_file,
-                                  qsev_guest_set_dh_cert_file,
-                                  NULL);
+                                  qsev_guest_set_dh_cert_file);
     object_class_property_set_description(oc, "dh-cert-file",
-            "guest owners DH certificate (encoded with base64)", NULL);
+            "guest owners DH certificate (encoded with base64)");
     object_class_property_add_str(oc, "session-file",
                                   qsev_guest_get_session_file,
-                                  qsev_guest_set_session_file,
-                                  NULL);
+                                  qsev_guest_set_session_file);
     object_class_property_set_description(oc, "session-file",
-            "guest owners session parameters (encoded with base64)", NULL);
-}
-
-static void
-qsev_guest_set_handle(Object *obj, Visitor *v, const char *name,
-                      void *opaque, Error **errp)
-{
-    QSevGuestInfo *sev = QSEV_GUEST_INFO(obj);
-    uint32_t value;
-
-    visit_type_uint32(v, name, &value, errp);
-    sev->handle = value;
-}
-
-static void
-qsev_guest_set_policy(Object *obj, Visitor *v, const char *name,
-                      void *opaque, Error **errp)
-{
-    QSevGuestInfo *sev = QSEV_GUEST_INFO(obj);
-    uint32_t value;
-
-    visit_type_uint32(v, name, &value, errp);
-    sev->policy = value;
-}
-
-static void
-qsev_guest_set_cbitpos(Object *obj, Visitor *v, const char *name,
-                       void *opaque, Error **errp)
-{
-    QSevGuestInfo *sev = QSEV_GUEST_INFO(obj);
-    uint32_t value;
-
-    visit_type_uint32(v, name, &value, errp);
-    sev->cbitpos = value;
-}
-
-static void
-qsev_guest_set_reduced_phys_bits(Object *obj, Visitor *v, const char *name,
-                                   void *opaque, Error **errp)
-{
-    QSevGuestInfo *sev = QSEV_GUEST_INFO(obj);
-    uint32_t value;
-
-    visit_type_uint32(v, name, &value, errp);
-    sev->reduced_phys_bits = value;
-}
-
-static void
-qsev_guest_get_policy(Object *obj, Visitor *v, const char *name,
-                      void *opaque, Error **errp)
-{
-    uint32_t value;
-    QSevGuestInfo *sev = QSEV_GUEST_INFO(obj);
-
-    value = sev->policy;
-    visit_type_uint32(v, name, &value, errp);
-}
-
-static void
-qsev_guest_get_handle(Object *obj, Visitor *v, const char *name,
-                      void *opaque, Error **errp)
-{
-    uint32_t value;
-    QSevGuestInfo *sev = QSEV_GUEST_INFO(obj);
-
-    value = sev->handle;
-    visit_type_uint32(v, name, &value, errp);
-}
-
-static void
-qsev_guest_get_cbitpos(Object *obj, Visitor *v, const char *name,
-                       void *opaque, Error **errp)
-{
-    uint32_t value;
-    QSevGuestInfo *sev = QSEV_GUEST_INFO(obj);
-
-    value = sev->cbitpos;
-    visit_type_uint32(v, name, &value, errp);
-}
-
-static void
-qsev_guest_get_reduced_phys_bits(Object *obj, Visitor *v, const char *name,
-                                   void *opaque, Error **errp)
-{
-    uint32_t value;
-    QSevGuestInfo *sev = QSEV_GUEST_INFO(obj);
-
-    value = sev->reduced_phys_bits;
-    visit_type_uint32(v, name, &value, errp);
+            "guest owners session parameters (encoded with base64)");
 }
 
 static void
@@ -336,15 +270,15 @@ qsev_guest_init(Object *obj)
 
     sev->sev_device = g_strdup(DEFAULT_SEV_DEVICE);
     sev->policy = DEFAULT_GUEST_POLICY;
-    object_property_add(obj, "policy", "uint32", qsev_guest_get_policy,
-                        qsev_guest_set_policy, NULL, NULL, NULL);
-    object_property_add(obj, "handle", "uint32", qsev_guest_get_handle,
-                        qsev_guest_set_handle, NULL, NULL, NULL);
-    object_property_add(obj, "cbitpos", "uint32", qsev_guest_get_cbitpos,
-                        qsev_guest_set_cbitpos, NULL, NULL, NULL);
-    object_property_add(obj, "reduced-phys-bits", "uint32",
-                        qsev_guest_get_reduced_phys_bits,
-                        qsev_guest_set_reduced_phys_bits, NULL, NULL, NULL);
+    object_property_add_uint32_ptr(obj, "policy", &sev->policy,
+                                   OBJ_PROP_FLAG_READWRITE);
+    object_property_add_uint32_ptr(obj, "handle", &sev->handle,
+                                   OBJ_PROP_FLAG_READWRITE);
+    object_property_add_uint32_ptr(obj, "cbitpos", &sev->cbitpos,
+                                   OBJ_PROP_FLAG_READWRITE);
+    object_property_add_uint32_ptr(obj, "reduced-phys-bits",
+                                   &sev->reduced_phys_bits,
+                                   OBJ_PROP_FLAG_READWRITE);
 }
 
 /* sev guest info */
@@ -739,7 +673,7 @@ sev_guest_init(const char *id)
                                         "reduced-phys-bits", NULL);
     if (s->reduced_phys_bits < 1) {
         error_report("%s: reduced_phys_bits check failed, it should be >=1,"
-                     "' requested '%d'", __func__, s->reduced_phys_bits);
+                     " requested '%d'", __func__, s->reduced_phys_bits);
         goto err;
     }
 
@@ -759,7 +693,7 @@ sev_guest_init(const char *id)
     ret = sev_platform_ioctl(s->sev_fd, SEV_PLATFORM_STATUS, &status,
                              &fw_error);
     if (ret) {
-        error_report("%s: failed to get platform status ret=%d"
+        error_report("%s: failed to get platform status ret=%d "
                      "fw_error='%d: %s'", __func__, ret, fw_error,
                      fw_error_to_str(fw_error));
         goto err;

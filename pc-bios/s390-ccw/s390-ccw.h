@@ -49,21 +49,15 @@ typedef unsigned long long __u64;
 #include "cio.h"
 #include "iplb.h"
 
-typedef struct irb Irb;
-typedef struct ccw1 Ccw1;
-typedef struct cmd_orb CmdOrb;
-typedef struct schib Schib;
-typedef struct chsc_area_sda ChscAreaSda;
-typedef struct senseid SenseId;
-typedef struct subchannel_id SubChannelId;
-
 /* start.s */
 void disabled_wait(void);
 void consume_sclp_int(void);
+void consume_io_int(void);
 
 /* main.c */
 void panic(const char *string);
 void write_subsystem_identification(void);
+void write_iplb_location(void);
 extern char stack[PAGE_SIZE * 8] __attribute__((__aligned__(PAGE_SIZE)));
 unsigned int get_loadparm_index(void);
 
@@ -80,7 +74,6 @@ unsigned long virtio_load_direct(ulong rec_list1, ulong rec_list2,
 bool virtio_is_supported(SubChannelId schid);
 void virtio_blk_setup_device(SubChannelId schid);
 int virtio_read(ulong sector, void *load_addr);
-int enable_mss_facility(void);
 u64 get_clock(void);
 ulong get_second(void);
 

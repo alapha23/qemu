@@ -18,7 +18,6 @@
 #include "qapi/qobject-input-visitor.h"
 #include "qapi/visitor-impl.h"
 #include "qemu/queue.h"
-#include "qemu-common.h"
 #include "qapi/qmp/qjson.h"
 #include "qapi/qmp/qbool.h"
 #include "qapi/qmp/qdict.h"
@@ -204,31 +203,32 @@ static const char *qobject_input_get_keyval(QObjectInputVisitor *qiv,
     return qstring_get_str(qstr);
 }
 
-static void qdict_add_key(const char *key, QObject *obj, void *opaque)
-{
-    GHashTable *h = opaque;
-    g_hash_table_insert(h, (gpointer) key, NULL);
-}
-
 static const QListEntry *qobject_input_push(QObjectInputVisitor *qiv,
                                             const char *name,
                                             QObject *obj, void *qapi)
 {
     GHashTable *h;
     StackObject *tos = g_new0(StackObject, 1);
+    QDict *qdict = qobject_to(QDict, obj);
+    QList *qlist = qobject_to(QList, obj);
+    const QDictEntry *entry;
 
     assert(obj);
     tos->name = name;
     tos->obj = obj;
     tos->qapi = qapi;
 
-    if (qobject_type(obj) == QTYPE_QDICT) {
+    if (qdict) {
         h = g_hash_table_new(g_str_hash, g_str_equal);
-        qdict_iter(qobject_to(QDict, obj), qdict_add_key, h);
+        for (entry = qdict_first(qdict);
+             entry;
+             entry = qdict_next(qdict, entry)) {
+            g_hash_table_insert(h, (void *)qdict_entry_key(entry), NULL);
+        }
         tos->h = h;
     } else {
-        assert(qobject_type(obj) == QTYPE_QLIST);
-        tos->entry = qlist_first(qobject_to(QList, obj));
+        assert(qlist);
+        tos->entry = qlist_first(qlist);
         tos->index = -1;
     }
 
@@ -562,19 +562,20 @@ static void qobject_input_type_number_keyval(Visitor *v, const char *name,
 {
     QObjectInputVisitor *qiv = to_qiv(v);
     const char *str = qobject_input_get_keyval(qiv, name, errp);
-    char *endp;
+    double val;
 
     if (!str) {
         return;
     }
 
-    errno = 0;
-    *obj = strtod(str, &endp);
-    if (errno || endp == str || *endp || !isfinite(*obj)) {
+    if (qemu_strtod_finite(str, NULL, &val)) {
         /* TODO report -ERANGE more nicely */
         error_setg(errp, QERR_INVALID_PARAMETER_TYPE,
                    full_name(qiv, name), "number");
+        return;
     }
+
+    *obj = val;
 }
 
 static void qobject_input_type_any(Visitor *v, const char *name, QObject **obj,

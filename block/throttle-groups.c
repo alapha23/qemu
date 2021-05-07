@@ -26,6 +26,7 @@
 #include "sysemu/block-backend.h"
 #include "block/throttle-groups.h"
 #include "qemu/throttle-options.h"
+#include "qemu/main-loop.h"
 #include "qemu/queue.h"
 #include "qemu/thread.h"
 #include "sysemu/qtest.h"
@@ -415,6 +416,9 @@ static void coroutine_fn throttle_group_restart_queue_entry(void *opaque)
     }
 
     g_free(data);
+
+    atomic_dec(&tgm->restart_pending);
+    aio_wait_kick();
 }
 
 static void throttle_group_restart_queue(ThrottleGroupMember *tgm, bool is_write)
@@ -429,6 +433,8 @@ static void throttle_group_restart_queue(ThrottleGroupMember *tgm, bool is_write
      * throttle_group_restart_tgm() is called. Either way, there can
      * be no timer pending on this tgm at this point */
     assert(!timer_pending(tgm->throttle_timers.timers[is_write]));
+
+    atomic_inc(&tgm->restart_pending);
 
     co = qemu_coroutine_create(throttle_group_restart_queue_entry, rd);
     aio_co_enter(tgm->aio_context, co);
@@ -538,6 +544,7 @@ void throttle_group_register_tgm(ThrottleGroupMember *tgm,
 
     tgm->throttle_state = ts;
     tgm->aio_context = ctx;
+    atomic_set(&tgm->restart_pending, 0);
 
     qemu_mutex_lock(&tg->lock);
     /* If the ThrottleGroup is new set this ThrottleGroupMember as the token */
@@ -583,6 +590,9 @@ void throttle_group_unregister_tgm(ThrottleGroupMember *tgm)
         /* Discard already unregistered tgm */
         return;
     }
+
+    /* Wait for throttle_group_restart_queue_entry() coroutines to finish */
+    AIO_WAIT_WHILE(tgm->aio_context, atomic_read(&tgm->restart_pending) > 0);
 
     qemu_mutex_lock(&tg->lock);
     for (i = 0; i < 2; i++) {
@@ -883,8 +893,7 @@ static void throttle_group_set_limits(Object *obj, Visitor *v,
 {
     ThrottleGroup *tg = THROTTLE_GROUP(obj);
     ThrottleConfig cfg;
-    ThrottleLimits arg = { 0 };
-    ThrottleLimits *argp = &arg;
+    ThrottleLimits *argp;
     Error *local_err = NULL;
 
     visit_type_ThrottleLimits(v, name, &argp, &local_err);
@@ -902,6 +911,7 @@ static void throttle_group_set_limits(Object *obj, Visitor *v,
 unlock:
     qemu_mutex_unlock(&tg->lock);
 ret:
+    qapi_free_ThrottleLimits(argp);
     error_propagate(errp, local_err);
     return;
 }
@@ -944,8 +954,7 @@ static void throttle_group_obj_class_init(ObjectClass *klass, void *class_data)
                                   "int",
                                   throttle_group_get,
                                   throttle_group_set,
-                                  NULL, &properties[i],
-                                  &error_abort);
+                                  NULL, &properties[i]);
     }
 
     /* ThrottleLimits */
@@ -953,8 +962,7 @@ static void throttle_group_obj_class_init(ObjectClass *klass, void *class_data)
                               "limits", "ThrottleLimits",
                               throttle_group_get_limits,
                               throttle_group_set_limits,
-                              NULL, NULL,
-                              &error_abort);
+                              NULL, NULL);
 }
 
 static const TypeInfo throttle_group_info = {

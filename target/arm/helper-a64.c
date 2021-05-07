@@ -18,12 +18,13 @@
  */
 
 #include "qemu/osdep.h"
+#include "qemu/units.h"
 #include "cpu.h"
 #include "exec/gdbstub.h"
 #include "exec/helper-proto.h"
 #include "qemu/host-utils.h"
 #include "qemu/log.h"
-#include "sysemu/sysemu.h"
+#include "qemu/main-loop.h"
 #include "qemu/bitops.h"
 #include "internals.h"
 #include "qemu/crc32c.h"
@@ -31,7 +32,7 @@
 #include "exec/cpu_ldst.h"
 #include "qemu/int128.h"
 #include "qemu/atomic128.h"
-#include "tcg.h"
+#include "tcg/tcg.h"
 #include "fpu/softfloat.h"
 #include <zlib.h> /* For crc32 */
 
@@ -59,6 +60,36 @@ int64_t HELPER(sdiv64)(int64_t num, int64_t den)
 uint64_t HELPER(rbit64)(uint64_t x)
 {
     return revbit64(x);
+}
+
+void HELPER(msr_i_spsel)(CPUARMState *env, uint32_t imm)
+{
+    update_spsel(env, imm);
+}
+
+static void daif_check(CPUARMState *env, uint32_t op,
+                       uint32_t imm, uintptr_t ra)
+{
+    /* DAIF update to PSTATE. This is OK from EL0 only if UMA is set.  */
+    if (arm_current_el(env) == 0 && !(arm_sctlr(env, 0) & SCTLR_UMA)) {
+        raise_exception_ra(env, EXCP_UDEF,
+                           syn_aa64_sysregtrap(0, extract32(op, 0, 3),
+                                               extract32(op, 3, 3), 4,
+                                               imm, 0x1f, 0),
+                           exception_target_el(env), ra);
+    }
+}
+
+void HELPER(msr_i_daifset)(CPUARMState *env, uint32_t imm)
+{
+    daif_check(env, 0x1e, imm, GETPC());
+    env->daif |= (imm << 6) & PSTATE_DAIF;
+}
+
+void HELPER(msr_i_daifclear)(CPUARMState *env, uint32_t imm)
+{
+    daif_check(env, 0x1f, imm, GETPC());
+    env->daif &= ~((imm << 6) & PSTATE_DAIF);
 }
 
 /* Convert a softfloat float_relation_ (as returned by
@@ -524,7 +555,7 @@ uint64_t HELPER(paired_cmpxchg64_le)(CPUARMState *env, uint64_t addr,
     /* ??? Enforce alignment.  */
     uint64_t *haddr = g2h(addr);
 
-    helper_retaddr = ra;
+    set_helper_retaddr(ra);
     o0 = ldq_le_p(haddr + 0);
     o1 = ldq_le_p(haddr + 1);
     oldv = int128_make128(o0, o1);
@@ -534,7 +565,7 @@ uint64_t HELPER(paired_cmpxchg64_le)(CPUARMState *env, uint64_t addr,
         stq_le_p(haddr + 0, int128_getlo(newv));
         stq_le_p(haddr + 1, int128_gethi(newv));
     }
-    helper_retaddr = 0;
+    clear_helper_retaddr();
 #else
     int mem_idx = cpu_mmu_index(env, false);
     TCGMemOpIdx oi0 = make_memop_idx(MO_LEQ | MO_ALIGN_16, mem_idx);
@@ -583,8 +614,8 @@ uint64_t HELPER(paired_cmpxchg64_be)(CPUARMState *env, uint64_t addr,
      * High and low need to be switched here because this is not actually a
      * 128bit store but two doublewords stored consecutively
      */
-    Int128 cmpv = int128_make128(env->exclusive_val, env->exclusive_high);
-    Int128 newv = int128_make128(new_lo, new_hi);
+    Int128 cmpv = int128_make128(env->exclusive_high, env->exclusive_val);
+    Int128 newv = int128_make128(new_hi, new_lo);
     Int128 oldv;
     uintptr_t ra = GETPC();
     uint64_t o0, o1;
@@ -594,7 +625,7 @@ uint64_t HELPER(paired_cmpxchg64_be)(CPUARMState *env, uint64_t addr,
     /* ??? Enforce alignment.  */
     uint64_t *haddr = g2h(addr);
 
-    helper_retaddr = ra;
+    set_helper_retaddr(ra);
     o1 = ldq_be_p(haddr + 0);
     o0 = ldq_be_p(haddr + 1);
     oldv = int128_make128(o0, o1);
@@ -604,7 +635,7 @@ uint64_t HELPER(paired_cmpxchg64_be)(CPUARMState *env, uint64_t addr,
         stq_be_p(haddr + 0, int128_gethi(newv));
         stq_be_p(haddr + 1, int128_getlo(newv));
     }
-    helper_retaddr = 0;
+    clear_helper_retaddr();
 #else
     int mem_idx = cpu_mmu_index(env, false);
     TCGMemOpIdx oi0 = make_memop_idx(MO_BEQ | MO_ALIGN_16, mem_idx);
@@ -887,6 +918,187 @@ uint32_t HELPER(advsimd_f16touinth)(uint32_t a, void *fpstp)
     return float16_to_uint16(a, fpst);
 }
 
+static int el_from_spsr(uint32_t spsr)
+{
+    /* Return the exception level that this SPSR is requesting a return to,
+     * or -1 if it is invalid (an illegal return)
+     */
+    if (spsr & PSTATE_nRW) {
+        switch (spsr & CPSR_M) {
+        case ARM_CPU_MODE_USR:
+            return 0;
+        case ARM_CPU_MODE_HYP:
+            return 2;
+        case ARM_CPU_MODE_FIQ:
+        case ARM_CPU_MODE_IRQ:
+        case ARM_CPU_MODE_SVC:
+        case ARM_CPU_MODE_ABT:
+        case ARM_CPU_MODE_UND:
+        case ARM_CPU_MODE_SYS:
+            return 1;
+        case ARM_CPU_MODE_MON:
+            /* Returning to Mon from AArch64 is never possible,
+             * so this is an illegal return.
+             */
+        default:
+            return -1;
+        }
+    } else {
+        if (extract32(spsr, 1, 1)) {
+            /* Return with reserved M[1] bit set */
+            return -1;
+        }
+        if (extract32(spsr, 0, 4) == 1) {
+            /* return to EL0 with M[0] bit set */
+            return -1;
+        }
+        return extract32(spsr, 2, 2);
+    }
+}
+
+void HELPER(exception_return)(CPUARMState *env, uint64_t new_pc)
+{
+    int cur_el = arm_current_el(env);
+    unsigned int spsr_idx = aarch64_banked_spsr_index(cur_el);
+    uint32_t mask, spsr = env->banked_spsr[spsr_idx];
+    int new_el;
+    bool return_to_aa64 = (spsr & PSTATE_nRW) == 0;
+
+    aarch64_save_sp(env, cur_el);
+
+    arm_clear_exclusive(env);
+
+    /* We must squash the PSTATE.SS bit to zero unless both of the
+     * following hold:
+     *  1. debug exceptions are currently disabled
+     *  2. singlestep will be active in the EL we return to
+     * We check 1 here and 2 after we've done the pstate/cpsr write() to
+     * transition to the EL we're going to.
+     */
+    if (arm_generate_debug_exceptions(env)) {
+        spsr &= ~PSTATE_SS;
+    }
+
+    new_el = el_from_spsr(spsr);
+    if (new_el == -1) {
+        goto illegal_return;
+    }
+    if (new_el > cur_el
+        || (new_el == 2 && !arm_feature(env, ARM_FEATURE_EL2))) {
+        /* Disallow return to an EL which is unimplemented or higher
+         * than the current one.
+         */
+        goto illegal_return;
+    }
+
+    if (new_el != 0 && arm_el_is_aa64(env, new_el) != return_to_aa64) {
+        /* Return to an EL which is configured for a different register width */
+        goto illegal_return;
+    }
+
+    if (new_el == 2 && arm_is_secure_below_el3(env)) {
+        /* Return to the non-existent secure-EL2 */
+        goto illegal_return;
+    }
+
+    if (new_el == 1 && (arm_hcr_el2_eff(env) & HCR_TGE)) {
+        goto illegal_return;
+    }
+
+    qemu_mutex_lock_iothread();
+    arm_call_pre_el_change_hook(env_archcpu(env));
+    qemu_mutex_unlock_iothread();
+
+    if (!return_to_aa64) {
+        env->aarch64 = 0;
+        /* We do a raw CPSR write because aarch64_sync_64_to_32()
+         * will sort the register banks out for us, and we've already
+         * caught all the bad-mode cases in el_from_spsr().
+         */
+        mask = aarch32_cpsr_valid_mask(env->features, &env_archcpu(env)->isar);
+        cpsr_write(env, spsr, mask, CPSRWriteRaw);
+        if (!arm_singlestep_active(env)) {
+            env->uncached_cpsr &= ~PSTATE_SS;
+        }
+        aarch64_sync_64_to_32(env);
+
+        if (spsr & CPSR_T) {
+            env->regs[15] = new_pc & ~0x1;
+        } else {
+            env->regs[15] = new_pc & ~0x3;
+        }
+        helper_rebuild_hflags_a32(env, new_el);
+        qemu_log_mask(CPU_LOG_INT, "Exception return from AArch64 EL%d to "
+                      "AArch32 EL%d PC 0x%" PRIx32 "\n",
+                      cur_el, new_el, env->regs[15]);
+    } else {
+        int tbii;
+
+        env->aarch64 = 1;
+        spsr &= aarch64_pstate_valid_mask(&env_archcpu(env)->isar);
+        pstate_write(env, spsr);
+        if (!arm_singlestep_active(env)) {
+            env->pstate &= ~PSTATE_SS;
+        }
+        aarch64_restore_sp(env, new_el);
+        helper_rebuild_hflags_a64(env, new_el);
+
+        /*
+         * Apply TBI to the exception return address.  We had to delay this
+         * until after we selected the new EL, so that we could select the
+         * correct TBI+TBID bits.  This is made easier by waiting until after
+         * the hflags rebuild, since we can pull the composite TBII field
+         * from there.
+         */
+        tbii = FIELD_EX32(env->hflags, TBFLAG_A64, TBII);
+        if ((tbii >> extract64(new_pc, 55, 1)) & 1) {
+            /* TBI is enabled. */
+            int core_mmu_idx = cpu_mmu_index(env, false);
+            if (regime_has_2_ranges(core_to_aa64_mmu_idx(core_mmu_idx))) {
+                new_pc = sextract64(new_pc, 0, 56);
+            } else {
+                new_pc = extract64(new_pc, 0, 56);
+            }
+        }
+        env->pc = new_pc;
+
+        qemu_log_mask(CPU_LOG_INT, "Exception return from AArch64 EL%d to "
+                      "AArch64 EL%d PC 0x%" PRIx64 "\n",
+                      cur_el, new_el, env->pc);
+    }
+
+    /*
+     * Note that cur_el can never be 0.  If new_el is 0, then
+     * el0_a64 is return_to_aa64, else el0_a64 is ignored.
+     */
+    aarch64_sve_change_el(env, cur_el, new_el, return_to_aa64);
+
+    qemu_mutex_lock_iothread();
+    arm_call_el_change_hook(env_archcpu(env));
+    qemu_mutex_unlock_iothread();
+
+    return;
+
+illegal_return:
+    /* Illegal return events of various kinds have architecturally
+     * mandated behaviour:
+     * restore NZCV and DAIF from SPSR_ELx
+     * set PSTATE.IL
+     * restore PC from ELR_ELx
+     * no change to exception level, execution state or stack pointer
+     */
+    env->pstate |= PSTATE_IL;
+    env->pc = new_pc;
+    spsr &= PSTATE_NZCV | PSTATE_DAIF;
+    spsr |= pstate_read(env) & ~(PSTATE_NZCV | PSTATE_DAIF);
+    pstate_write(env, spsr);
+    if (!arm_singlestep_active(env)) {
+        env->pstate &= ~PSTATE_SS;
+    }
+    qemu_log_mask(LOG_GUEST_ERROR, "Illegal exception return at EL%d: "
+                  "resuming execution at 0x%" PRIx64 "\n", cur_el, env->pc);
+}
+
 /*
  * Square Root and Reciprocal square root
  */
@@ -898,4 +1110,94 @@ uint32_t HELPER(sqrt_f16)(uint32_t a, void *fpstp)
     return float16_sqrt(a, s);
 }
 
+void HELPER(dc_zva)(CPUARMState *env, uint64_t vaddr_in)
+{
+    /*
+     * Implement DC ZVA, which zeroes a fixed-length block of memory.
+     * Note that we do not implement the (architecturally mandated)
+     * alignment fault for attempts to use this on Device memory
+     * (which matches the usual QEMU behaviour of not implementing either
+     * alignment faults or any memory attribute handling).
+     */
 
+    ARMCPU *cpu = env_archcpu(env);
+    uint64_t blocklen = 4 << cpu->dcz_blocksize;
+    uint64_t vaddr = vaddr_in & ~(blocklen - 1);
+
+#ifndef CONFIG_USER_ONLY
+    {
+        /*
+         * Slightly awkwardly, QEMU's TARGET_PAGE_SIZE may be less than
+         * the block size so we might have to do more than one TLB lookup.
+         * We know that in fact for any v8 CPU the page size is at least 4K
+         * and the block size must be 2K or less, but TARGET_PAGE_SIZE is only
+         * 1K as an artefact of legacy v5 subpage support being present in the
+         * same QEMU executable. So in practice the hostaddr[] array has
+         * two entries, given the current setting of TARGET_PAGE_BITS_MIN.
+         */
+        int maxidx = DIV_ROUND_UP(blocklen, TARGET_PAGE_SIZE);
+        void *hostaddr[DIV_ROUND_UP(2 * KiB, 1 << TARGET_PAGE_BITS_MIN)];
+        int try, i;
+        unsigned mmu_idx = cpu_mmu_index(env, false);
+        TCGMemOpIdx oi = make_memop_idx(MO_UB, mmu_idx);
+
+        assert(maxidx <= ARRAY_SIZE(hostaddr));
+
+        for (try = 0; try < 2; try++) {
+
+            for (i = 0; i < maxidx; i++) {
+                hostaddr[i] = tlb_vaddr_to_host(env,
+                                                vaddr + TARGET_PAGE_SIZE * i,
+                                                1, mmu_idx);
+                if (!hostaddr[i]) {
+                    break;
+                }
+            }
+            if (i == maxidx) {
+                /*
+                 * If it's all in the TLB it's fair game for just writing to;
+                 * we know we don't need to update dirty status, etc.
+                 */
+                for (i = 0; i < maxidx - 1; i++) {
+                    memset(hostaddr[i], 0, TARGET_PAGE_SIZE);
+                }
+                memset(hostaddr[i], 0, blocklen - (i * TARGET_PAGE_SIZE));
+                return;
+            }
+            /*
+             * OK, try a store and see if we can populate the tlb. This
+             * might cause an exception if the memory isn't writable,
+             * in which case we will longjmp out of here. We must for
+             * this purpose use the actual register value passed to us
+             * so that we get the fault address right.
+             */
+            helper_ret_stb_mmu(env, vaddr_in, 0, oi, GETPC());
+            /* Now we can populate the other TLB entries, if any */
+            for (i = 0; i < maxidx; i++) {
+                uint64_t va = vaddr + TARGET_PAGE_SIZE * i;
+                if (va != (vaddr_in & TARGET_PAGE_MASK)) {
+                    helper_ret_stb_mmu(env, va, 0, oi, GETPC());
+                }
+            }
+        }
+
+        /*
+         * Slow path (probably attempt to do this to an I/O device or
+         * similar, or clearing of a block of code we have translations
+         * cached for). Just do a series of byte writes as the architecture
+         * demands. It's not worth trying to use a cpu_physical_memory_map(),
+         * memset(), unmap() sequence here because:
+         *  + we'd need to account for the blocksize being larger than a page
+         *  + the direct-RAM access case is almost always going to be dealt
+         *    with in the fastpath code above, so there's no speed benefit
+         *  + we would have to deal with the map returning NULL because the
+         *    bounce buffer was in use
+         */
+        for (i = 0; i < blocklen; i++) {
+            helper_ret_stb_mmu(env, vaddr + i, 0, oi, GETPC());
+        }
+    }
+#else
+    memset(g2h(vaddr), 0, blocklen);
+#endif
+}

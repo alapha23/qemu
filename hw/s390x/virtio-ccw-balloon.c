@@ -10,8 +10,10 @@
  */
 
 #include "qemu/osdep.h"
+#include "hw/qdev-properties.h"
 #include "hw/virtio/virtio.h"
 #include "qapi/error.h"
+#include "qemu/module.h"
 #include "virtio-ccw.h"
 
 static void virtio_ccw_balloon_realize(VirtioCcwDevice *ccw_dev, Error **errp)
@@ -30,10 +32,10 @@ static void virtio_ccw_balloon_instance_init(Object *obj)
     virtio_instance_init_common(obj, &dev->vdev, sizeof(dev->vdev),
                                 TYPE_VIRTIO_BALLOON);
     object_property_add_alias(obj, "guest-stats", OBJECT(&dev->vdev),
-                              "guest-stats", &error_abort);
+                              "guest-stats");
     object_property_add_alias(obj, "guest-stats-polling-interval",
                               OBJECT(&dev->vdev),
-                              "guest-stats-polling-interval", &error_abort);
+                              "guest-stats-polling-interval");
 }
 
 static Property virtio_ccw_balloon_properties[] = {
@@ -50,7 +52,7 @@ static void virtio_ccw_balloon_class_init(ObjectClass *klass, void *data)
     VirtIOCCWDeviceClass *k = VIRTIO_CCW_DEVICE_CLASS(klass);
 
     k->realize = virtio_ccw_balloon_realize;
-    dc->props = virtio_ccw_balloon_properties;
+    device_class_set_props(dc, virtio_ccw_balloon_properties);
     set_bit(DEVICE_CATEGORY_MISC, dc->categories);
 }
 

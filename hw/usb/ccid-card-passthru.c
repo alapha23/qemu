@@ -9,10 +9,14 @@
  */
 
 #include "qemu/osdep.h"
+#include "qemu-common.h"
 #include "qemu/units.h"
 #include <libcacard.h>
 #include "chardev/char-fe.h"
+#include "hw/qdev-properties.h"
+#include "migration/vmstate.h"
 #include "qemu/error-report.h"
+#include "qemu/module.h"
 #include "qemu/sockets.h"
 #include "ccid.h"
 #include "qapi/error.h"
@@ -303,7 +307,7 @@ static void ccid_card_vscard_read(void *opaque, const uint8_t *buf, int size)
     }
 }
 
-static void ccid_card_vscard_event(void *opaque, int event)
+static void ccid_card_vscard_event(void *opaque, QEMUChrEvent event)
 {
     PassthruState *card = opaque;
 
@@ -313,6 +317,11 @@ static void ccid_card_vscard_event(void *opaque, int event)
         break;
     case CHR_EVENT_OPENED:
         DPRINTF(card, D_INFO, "%s: CHR_EVENT_OPENED\n", __func__);
+        break;
+    case CHR_EVENT_MUX_IN:
+    case CHR_EVENT_MUX_OUT:
+    case CHR_EVENT_CLOSED:
+        /* Ignore */
         break;
     }
 }
@@ -394,7 +403,7 @@ static void passthru_class_initfn(ObjectClass *klass, void *data)
     set_bit(DEVICE_CATEGORY_INPUT, dc->categories);
     dc->desc = "passthrough smartcard";
     dc->vmsd = &passthru_vmstate;
-    dc->props = passthru_card_properties;
+    device_class_set_props(dc, passthru_card_properties);
 }
 
 static const TypeInfo passthru_card_info = {

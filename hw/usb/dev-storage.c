@@ -9,15 +9,15 @@
 
 #include "qemu/osdep.h"
 #include "qapi/error.h"
-#include "qemu-common.h"
 #include "qemu/error-report.h"
+#include "qemu/module.h"
 #include "qemu/option.h"
 #include "qemu/config-file.h"
 #include "hw/usb.h"
 #include "desc.h"
+#include "hw/qdev-properties.h"
 #include "hw/scsi/scsi.h"
-#include "ui/console.h"
-#include "monitor/monitor.h"
+#include "migration/vmstate.h"
 #include "sysemu/sysemu.h"
 #include "sysemu/block-backend.h"
 #include "qapi/visitor.h"
@@ -616,7 +616,7 @@ static void usb_msd_storage_realize(USBDevice *dev, Error **errp)
      * The hack is probably a bad idea.
      */
     blk_ref(blk);
-    blk_detach_dev(blk, &s->dev.qdev);
+    blk_detach_dev(blk, DEVICE(s));
     s->conf.blk = NULL;
 
     usb_desc_create_serial(dev);
@@ -700,7 +700,7 @@ static void usb_msd_class_storage_initfn(ObjectClass *klass, void *data)
     USBDeviceClass *uc = USB_DEVICE_CLASS(klass);
 
     uc->realize = usb_msd_storage_realize;
-    dc->props = msd_properties;
+    device_class_set_props(dc, msd_properties);
 }
 
 static void usb_msd_get_bootindex(Object *obj, Visitor *v, const char *name,
@@ -753,7 +753,7 @@ static void usb_msd_instance_init(Object *obj)
 {
     object_property_add(obj, "bootindex", "int32",
                         usb_msd_get_bootindex,
-                        usb_msd_set_bootindex, NULL, NULL, NULL);
+                        usb_msd_set_bootindex, NULL, NULL);
     object_property_set_int(obj, -1, "bootindex", NULL);
 }
 

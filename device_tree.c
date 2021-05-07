@@ -84,6 +84,10 @@ void *load_device_tree(const char *filename_path, int *sizep)
                      filename_path);
         goto fail;
     }
+    if (dt_size > INT_MAX / 2 - 10000) {
+        error_report("Device tree file '%s' is too large", filename_path);
+        goto fail;
+    }
 
     /* Expand to 2x size to give enough room for manipulation.  */
     dt_size += 10000;
@@ -91,7 +95,7 @@ void *load_device_tree(const char *filename_path, int *sizep)
     /* First allocate space in qemu for device tree */
     fdt = g_malloc0(dt_size);
 
-    dt_file_load_size = load_image(filename_path, fdt);
+    dt_file_load_size = load_image_size(filename_path, fdt, dt_size);
     if (dt_file_load_size < 0) {
         error_report("Unable to open device tree file '%s'",
                      filename_path);
@@ -287,7 +291,7 @@ char **qemu_fdt_node_unit_path(void *fdt, const char *name, Error **errp)
     return path_array;
 }
 
-char **qemu_fdt_node_path(void *fdt, const char *name, char *compat,
+char **qemu_fdt_node_path(void *fdt, const char *name, const char *compat,
                           Error **errp)
 {
     int offset, len, ret;
@@ -304,7 +308,7 @@ char **qemu_fdt_node_path(void *fdt, const char *name, char *compat,
             offset = len;
             break;
         }
-        if (!strcmp(iter_name, name)) {
+        if (!name || !strcmp(iter_name, name)) {
             char *path;
 
             path = g_malloc(path_len);
@@ -526,7 +530,12 @@ void qemu_fdt_dumpdtb(void *fdt, int size)
 
     if (dumpdtb) {
         /* Dump the dtb to a file and quit */
-        exit(g_file_set_contents(dumpdtb, fdt, size, NULL) ? 0 : 1);
+        if (g_file_set_contents(dumpdtb, fdt, size, NULL)) {
+            info_report("dtb dumped to %s. Exiting.", dumpdtb);
+            exit(0);
+        }
+        error_report("%s: Failed dumping dtb to %s", __func__, dumpdtb);
+        exit(1);
     }
 }
 

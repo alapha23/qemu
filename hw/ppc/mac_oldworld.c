@@ -23,14 +23,15 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+
 #include "qemu/osdep.h"
+#include "qemu-common.h"
 #include "qemu/units.h"
 #include "qapi/error.h"
-#include "hw/hw.h"
 #include "hw/ppc/ppc.h"
+#include "hw/qdev-properties.h"
 #include "mac.h"
 #include "hw/input/adb.h"
-#include "hw/timer/m48t59.h"
 #include "sysemu/sysemu.h"
 #include "net/net.h"
 #include "hw/isa/isa.h"
@@ -40,12 +41,12 @@
 #include "hw/nvram/fw_cfg.h"
 #include "hw/char/escc.h"
 #include "hw/misc/macio/macio.h"
-#include "hw/ide.h"
 #include "hw/loader.h"
 #include "hw/fw-path-provider.h"
 #include "elf.h"
 #include "qemu/error-report.h"
 #include "sysemu/kvm.h"
+#include "sysemu/reset.h"
 #include "kvm_ppc.h"
 #include "exec/address-spaces.h"
 
@@ -89,7 +90,6 @@ static void ppc_heathrow_init(MachineState *machine)
     CPUPPCState *env = NULL;
     char *filename;
     int linux_boot, i;
-    MemoryRegion *ram = g_new(MemoryRegion, 1);
     MemoryRegion *bios = g_new(MemoryRegion, 1);
     uint32_t kernel_base, initrd_base, cmdline_base = 0;
     int32_t kernel_size, initrd_size;
@@ -99,8 +99,8 @@ static void ppc_heathrow_init(MachineState *machine)
     SysBusDevice *s;
     DeviceState *dev, *pic_dev;
     BusState *adb_bus;
-    int bios_size, ndrv_size;
-    uint8_t *ndrv_file;
+    int bios_size;
+    unsigned int smp_cpus = machine->smp.cpus;
     uint16_t ppc_boot_device;
     DriveInfo *hd[MAX_IDE_BUS * MAX_IDE_DEVS];
     void *fw_cfg;
@@ -125,23 +125,20 @@ static void ppc_heathrow_init(MachineState *machine)
         exit(1);
     }
 
-    memory_region_allocate_system_memory(ram, NULL, "ppc_heathrow.ram",
-                                         ram_size);
-    memory_region_add_subregion(sysmem, 0, ram);
+    memory_region_add_subregion(sysmem, 0, machine->ram);
 
     /* allocate and load BIOS */
-    memory_region_init_ram(bios, NULL, "ppc_heathrow.bios", BIOS_SIZE,
+    memory_region_init_rom(bios, NULL, "ppc_heathrow.bios", BIOS_SIZE,
                            &error_fatal);
 
     if (bios_name == NULL)
         bios_name = PROM_FILENAME;
     filename = qemu_find_file(QEMU_FILE_TYPE_BIOS, bios_name);
-    memory_region_set_readonly(bios, true);
     memory_region_add_subregion(sysmem, PROM_ADDR, bios);
 
     /* Load OpenBIOS (ELF) */
     if (filename) {
-        bios_size = load_elf(filename, 0, NULL, NULL, NULL, NULL,
+        bios_size = load_elf(filename, NULL, 0, NULL, NULL, NULL, NULL, NULL,
                              1, PPC_ELF_MACHINE, 0, 0);
         g_free(filename);
     } else {
@@ -162,8 +159,9 @@ static void ppc_heathrow_init(MachineState *machine)
         bswap_needed = 0;
 #endif
         kernel_base = KERNEL_LOAD_ADDR;
-        kernel_size = load_elf(kernel_filename, translate_kernel_address, NULL,
-                               NULL, &lowaddr, NULL, 1, PPC_ELF_MACHINE,
+        kernel_size = load_elf(kernel_filename, NULL,
+                               translate_kernel_address, NULL,
+                               NULL, &lowaddr, NULL, NULL, 1, PPC_ELF_MACHINE,
                                0, 0);
         if (kernel_size < 0)
             kernel_size = load_aout(kernel_filename, kernel_base,
@@ -316,14 +314,14 @@ static void ppc_heathrow_init(MachineState *machine)
     qdev_prop_set_uint32(dev, "data_width", 1);
     qdev_prop_set_bit(dev, "dma_enabled", false);
     object_property_add_child(OBJECT(qdev_get_machine()), TYPE_FW_CFG,
-                              OBJECT(fw_cfg), NULL);
+                              OBJECT(fw_cfg));
     qdev_init_nofail(dev);
     s = SYS_BUS_DEVICE(dev);
     sysbus_mmio_map(s, 0, CFG_ADDR);
     sysbus_mmio_map(s, 1, CFG_ADDR + 2);
 
     fw_cfg_add_i16(fw_cfg, FW_CFG_NB_CPUS, (uint16_t)smp_cpus);
-    fw_cfg_add_i16(fw_cfg, FW_CFG_MAX_CPUS, (uint16_t)max_cpus);
+    fw_cfg_add_i16(fw_cfg, FW_CFG_MAX_CPUS, (uint16_t)machine->smp.max_cpus);
     fw_cfg_add_i64(fw_cfg, FW_CFG_RAM_SIZE, (uint64_t)ram_size);
     fw_cfg_add_i16(fw_cfg, FW_CFG_MACHINE_ID, ARCH_HEATHROW);
     fw_cfg_add_i32(fw_cfg, FW_CFG_KERNEL_ADDR, kernel_base);
@@ -344,14 +342,12 @@ static void ppc_heathrow_init(MachineState *machine)
 
     fw_cfg_add_i32(fw_cfg, FW_CFG_PPC_IS_KVM, kvm_enabled());
     if (kvm_enabled()) {
-#ifdef CONFIG_KVM
         uint8_t *hypercall;
 
         hypercall = g_malloc(16);
         kvmppc_get_hypercall(env, hypercall, 16);
         fw_cfg_add_bytes(fw_cfg, FW_CFG_PPC_KVM_HC, hypercall, 16);
         fw_cfg_add_i32(fw_cfg, FW_CFG_PPC_KVM_PID, getpid());
-#endif
     }
     fw_cfg_add_i32(fw_cfg, FW_CFG_PPC_TBFREQ, tbfreq);
     /* Mac OS X requires a "known good" clock-frequency value; pass it one. */
@@ -361,11 +357,10 @@ static void ppc_heathrow_init(MachineState *machine)
     /* MacOS NDRV VGA driver */
     filename = qemu_find_file(QEMU_FILE_TYPE_BIOS, NDRV_VGA_FILENAME);
     if (filename) {
-        ndrv_size = get_image_size(filename);
-        if (ndrv_size != -1) {
-            ndrv_file = g_malloc(ndrv_size);
-            ndrv_size = load_image(filename, ndrv_file);
+        gchar *ndrv_file;
+        gsize ndrv_size;
 
+        if (g_file_get_contents(filename, &ndrv_file, &ndrv_size, NULL)) {
             fw_cfg_add_file(fw_cfg, "ndrv/qemu_vga.ndrv", ndrv_file, ndrv_size);
         }
         g_free(filename);
@@ -404,11 +399,11 @@ static char *heathrow_fw_dev_path(FWPathProvider *p, BusState *bus,
             return g_strdup("cdrom");
         }
 
-        return g_strdup("hd");
+        return g_strdup("disk");
     }
 
     if (!strcmp(object_get_typename(OBJECT(dev)), "ide-hd")) {
-        return g_strdup("hd");
+        return g_strdup("disk");
     }
 
     if (!strcmp(object_get_typename(OBJECT(dev)), "ide-cd")) {
@@ -422,7 +417,7 @@ static char *heathrow_fw_dev_path(FWPathProvider *p, BusState *bus,
     return NULL;
 }
 
-static int heathrow_kvm_type(const char *arg)
+static int heathrow_kvm_type(MachineState *machine, const char *arg)
 {
     /* Always force PR KVM */
     return 2;
@@ -438,7 +433,7 @@ static void heathrow_class_init(ObjectClass *oc, void *data)
     mc->block_default_type = IF_IDE;
     mc->max_cpus = MAX_CPUS;
 #ifndef TARGET_PPC64
-    mc->is_default = 1;
+    mc->is_default = true;
 #endif
     /* TOFIX "cad" when Mac floppy is implemented */
     mc->default_boot_order = "cd";
@@ -446,6 +441,7 @@ static void heathrow_class_init(ObjectClass *oc, void *data)
     mc->default_cpu_type = POWERPC_CPU_TYPE_NAME("750_v3.1");
     mc->default_display = "std";
     mc->ignore_boot_device_suffixes = true;
+    mc->default_ram_id = "ppc_heathrow.ram";
     fwc->get_dev_path = heathrow_fw_dev_path;
 }
 

@@ -19,6 +19,7 @@
 
 #include "qemu/osdep.h"
 #include "block/throttle-groups.h"
+#include "qemu/module.h"
 #include "qemu/option.h"
 #include "qemu/throttle-options.h"
 #include "qapi/error.h"
@@ -80,8 +81,9 @@ static int throttle_open(BlockDriverState *bs, QDict *options,
     char *group;
     int ret;
 
-    bs->file = bdrv_open_child(NULL, options, "file", bs,
-                               &child_file, false, errp);
+    bs->file = bdrv_open_child(NULL, options, "file", bs, &child_of_bds,
+                               BDRV_CHILD_FILTERED | BDRV_CHILD_PRIMARY,
+                               false, errp);
     if (!bs->file) {
         return -EINVAL;
     }
@@ -206,12 +208,6 @@ static void throttle_reopen_abort(BDRVReopenState *reopen_state)
     reopen_state->opaque = NULL;
 }
 
-static bool throttle_recurse_is_first_non_filter(BlockDriverState *bs,
-                                                 BlockDriverState *candidate)
-{
-    return bdrv_recurse_is_first_non_filter(bs->file->bs, candidate);
-}
-
 static void coroutine_fn throttle_co_drain_begin(BlockDriverState *bs)
 {
     ThrottleGroupMember *tgm = bs->opaque;
@@ -227,6 +223,12 @@ static void coroutine_fn throttle_co_drain_end(BlockDriverState *bs)
     atomic_dec(&tgm->io_limits_disabled);
 }
 
+static const char *const throttle_strong_runtime_opts[] = {
+    QEMU_OPT_THROTTLE_GROUP_NAME,
+
+    NULL
+};
+
 static BlockDriver bdrv_throttle = {
     .format_name                        =   "throttle",
     .instance_size                      =   sizeof(ThrottleGroupMember),
@@ -235,7 +237,7 @@ static BlockDriver bdrv_throttle = {
     .bdrv_close                         =   throttle_close,
     .bdrv_co_flush                      =   throttle_co_flush,
 
-    .bdrv_child_perm                    =   bdrv_filter_default_perms,
+    .bdrv_child_perm                    =   bdrv_default_perms,
 
     .bdrv_getlength                     =   throttle_getlength,
 
@@ -244,8 +246,6 @@ static BlockDriver bdrv_throttle = {
 
     .bdrv_co_pwrite_zeroes              =   throttle_co_pwrite_zeroes,
     .bdrv_co_pdiscard                   =   throttle_co_pdiscard,
-
-    .bdrv_recurse_is_first_non_filter   =   throttle_recurse_is_first_non_filter,
 
     .bdrv_attach_aio_context            =   throttle_attach_aio_context,
     .bdrv_detach_aio_context            =   throttle_detach_aio_context,
@@ -259,6 +259,7 @@ static BlockDriver bdrv_throttle = {
     .bdrv_co_drain_end                  =   throttle_co_drain_end,
 
     .is_filter                          =   true,
+    .strong_runtime_opts                =   throttle_strong_runtime_opts,
 };
 
 static void bdrv_throttle_init(void)
